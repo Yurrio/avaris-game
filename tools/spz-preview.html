@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>SPZ · просмотр</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1016;overflow:hidden;font:12px/1.4 ui-monospace,monospace;color:#9ff2e6}
+  canvas{display:block}
+  #hud{position:fixed;left:10px;top:10px;background:#0009;padding:8px 10px;border:1px solid #9ff2e633;white-space:pre;z-index:2}
+  #hud b{color:#fff}
+</style>
+<script type="importmap">{ "imports": { "three": "../vendor/three.module.js" } }</script>
+</head>
+<body>
+<div id="hud">загрузка…</div>
+<script type="module">
+import * as THREE from 'three';
+import { SplatMesh } from '../vendor/splats/gaussian-splats-3d.module.js';
+
+const hud = document.getElementById('hud');
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1016);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.05, 5000);
+camera.position.set(0, 2, 8);
+
+const grid = new THREE.GridHelper(20, 20, 0x2a6a63, 0x16302e);
+scene.add(grid);
+scene.add(new THREE.AxesHelper(2));
+
+const splat = new SplatMesh({ url: '../assets/models/avaris-ruins.spz' });
+scene.add(splat);
+
+if (splat.initialized) await splat.initialized;
+
+// границы: библиотека кладёт их в boundingBox / unpackedSplats
+let box = null;
+try {
+  const b = splat.getBoundingBox?.();
+  if (b && b.min && b.max) box = b;
+} catch (e) {}
+if (!box) { try { box = splat.boundingBox; } catch (e) {} }
+if (!box) { try { box = splat.packedSplats?.getBoundingBox?.(); } catch (e) {} }
+
+let info = '';
+if (box && box.min && box.max) {
+  const s = new THREE.Vector3().subVectors(box.max, box.min);
+  const c = new THREE.Vector3().addVectors(box.max, box.min).multiplyScalar(0.5);
+  info = `bounds min ${box.min.toArray().map(n => n.toFixed(2))}\n` +
+         `       max ${box.max.toArray().map(n => n.toFixed(2))}\n` +
+         `size   ${s.toArray().map(n => n.toFixed(2))}\n` +
+         `center ${c.toArray().map(n => n.toFixed(2))}`;
+  // поставить камеру так, чтобы объект влез
+  const r = Math.max(s.x, s.y, s.z);
+  camera.position.set(c.x + r * 1.1, c.y + r * 0.5, c.z + r * 1.1);
+  camera.lookAt(c);
+  // сетка под объектом
+  grid.position.y = box.min.y;
+  window.__spz = { box, size: s.toArray(), center: c.toArray(), numSplats: splat.packedSplats?.numSplats ?? null };
+} else {
+  info = 'bounds не получены';
+  window.__spz = { numSplats: splat.packedSplats?.numSplats ?? null };
+}
+hud.innerHTML = `<b>avaris-ruins.spz</b>\n${info}\nsplats: ${window.__spz.numSplats ?? '?'}`;
+
+let drag = false, px = 0, py = 0;
+renderer.domElement.addEventListener('pointerdown', e => { drag = true; px = e.clientX; py = e.clientY; });
+addEventListener('pointerup', () => drag = false);
+addEventListener('pointermove', e => {
+  if (!drag) return;
+  camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), (e.clientX - px) * 0.005);
+  px = e.clientX; py = e.clientY;
+});
+addEventListener('wheel', e => {
+  camera.position.multiplyScalar(1 + Math.sign(e.deltaY) * 0.08);
+}, { passive: true });
+
+function loop() {
+  requestAnimationFrame(loop);
+  try { splat.update?.(); } catch (e) {}
+  renderer.render(scene, camera);
+}
+loop();
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+window.__ready = true;
+</script>
+</body>
+</html>

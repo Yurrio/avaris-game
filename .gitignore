@@ -1,0 +1,9 @@
+# служебное
+.DS_Store
+.firebase/
+node_modules/
+*.log
+
+# личные настройки редактора
+.vscode/settings.json
+.idea/

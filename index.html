@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>АВАРИС · По ту сторону бури</title>
+<style>
+  /* Тангутские знаки механизмов (西夏文). Шрифт нужен и в DOM, и в canvas:
+     в canvas его подставляют руками — см. js/tangut.js → canvasFont(). */
+  @font-face{
+    font-family:'TangutSign';
+    src:url('assets/fonts/NotoSerifTangut.woff2') format('woff2');
+    font-display:block;
+    unicode-range:U+2FF0-2FFF,U+31EF,U+16FE0,U+17000-18AFF,U+18D00-18D7F,U+18D80-18DFF;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;background:#05080d;overflow:hidden;color:#dff2fb;
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;user-select:none;
+    -webkit-font-smoothing:antialiased}
+  canvas{display:block}
+  #app{position:fixed;inset:0}
+
+  #vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
+    background:radial-gradient(ellipse at 50% 45%,rgba(0,0,0,0) 52%,rgba(2,6,12,.42) 100%)}
+  #fogveil{position:fixed;inset:0;pointer-events:none;z-index:8;opacity:0;
+    background:radial-gradient(ellipse at 50% 50%,rgba(196,214,226,.72),rgba(150,176,194,.96) 72%);
+    transition:opacity .25s linear}
+  #damage{position:fixed;inset:0;pointer-events:none;z-index:9;opacity:0;
+    background:radial-gradient(ellipse at 50% 50%,rgba(255,60,20,0) 42%,rgba(215,40,15,.85) 100%)}
+
+  .panel{background:linear-gradient(160deg,rgba(9,22,32,.8),rgba(7,16,24,.58));
+    border:1px solid rgba(78,158,196,.22);border-radius:4px;
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+
+  /* ---------- заголовок ---------- */
+  #title{position:fixed;left:22px;top:18px;z-index:6;pointer-events:none}
+  #title b{display:block;font-size:13px;letter-spacing:6px;font-weight:600;color:#9fe8ff;
+    text-shadow:0 0 14px rgba(80,200,255,.55)}
+  #title span{display:block;font-size:9.5px;letter-spacing:3.4px;color:#ff9f52;margin-top:5px;
+    text-shadow:0 0 12px rgba(255,140,60,.5)}
+
+  /* ---------- буря ---------- */
+  #storm{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:7;
+    width:min(420px,calc(100vw - 420px));padding:9px 14px 11px;pointer-events:none}
+  #storm .row{display:flex;justify-content:space-between;align-items:baseline;
+    font-size:10px;letter-spacing:3px;color:#8fb8cb;margin-bottom:7px}
+  #storm .row b{font-size:15px;letter-spacing:2px;color:#eafcff;font-variant-numeric:tabular-nums}
+  #storm .bar{height:5px;border-radius:3px;background:rgba(90,160,190,.16);overflow:hidden}
+  #storm .bar i{display:block;height:100%;width:100%;
+    background:linear-gradient(90deg,#2f9fc4,#8fe3ff);transition:width .2s linear}
+  #storm .row.tiny{font-size:9px;letter-spacing:2px;opacity:.68;margin:5px 0 0}
+  #storm .row.tiny b{font-size:11px;letter-spacing:1.5px}
+  #storm.warn .bar i{background:linear-gradient(90deg,#c07a22,#ffd48a)}
+  #storm.warn .row b{color:#ffd48a}
+  #storm.crit{border-color:rgba(255,90,60,.6);box-shadow:0 0 26px rgba(255,70,40,.22)}
+  #storm.crit .bar i{background:linear-gradient(90deg,#c8412c,#ffa16b)}
+  #storm.crit .row b{color:#ffb4a0}
+
+  /* ---------- цель ---------- */
+  #objectiveBox{position:fixed;left:50%;top:86px;transform:translateX(-50%);z-index:6;
+    text-align:center;pointer-events:none;min-width:280px}
+  #objective{font-size:12px;letter-spacing:3.2px;color:#eafcff;
+    text-shadow:0 0 14px rgba(90,200,255,.5)}
+  #objectiveSub{font-size:10px;letter-spacing:2px;color:#7ba7bd;margin-top:6px}
+
+  /* ---------- показатели ---------- */
+  #stats{position:fixed;right:22px;top:18px;z-index:6;padding:12px 14px;width:200px;
+    font-size:10px;letter-spacing:2px;pointer-events:none}
+  #stats .row{display:flex;justify-content:space-between;align-items:center;
+    padding:3px 0;color:#8fb8cb}
+  #stats .row b{color:#eafcff;font-weight:600;letter-spacing:1.5px}
+  #stats .lbl{text-transform:uppercase}
+  .bar{height:4px;border-radius:2px;background:rgba(90,160,190,.18);margin-top:6px;overflow:hidden}
+  .bar i{display:block;height:100%;width:100%;
+    background:linear-gradient(90deg,#2f9fc4,#8fe3ff);transition:width .2s linear}
+  .bar.hp i{background:linear-gradient(90deg,#c8412c,#ffa16b)}
+  #stats.crit{border-color:rgba(255,90,60,.55)}
+
+  /* ---------- телеметрия ---------- */
+  #hud{position:fixed;left:22px;bottom:20px;z-index:6;font-size:10px;line-height:2;
+    letter-spacing:2px;padding:11px 16px 11px 12px;pointer-events:none;
+    border-left:2px solid rgba(64,150,190,.55)}
+  #hud div{color:#8fb8cb}
+  #hud b{color:#eafcff;letter-spacing:1.5px}
+
+  /* ---------- клавиши ---------- */
+  #keys{position:fixed;right:22px;bottom:20px;z-index:6;font-size:10px;line-height:1.9;
+    letter-spacing:1.6px;text-align:right;color:#5f8fa5;pointer-events:none}
+  #keys kbd{color:#a8d8ee;background:rgba(80,160,200,.1);border:1px solid rgba(80,160,200,.25);
+    padding:1px 6px;border-radius:3px;font-family:inherit;font-size:9px}
+
+  /* ---------- радар ---------- */
+  #radarWrap{position:fixed;right:22px;bottom:96px;z-index:6;pointer-events:none}
+  #radar{display:block;filter:drop-shadow(0 0 14px rgba(60,180,230,.25))}
+  #radarLabel{font-size:9px;letter-spacing:2.6px;color:#5f8fa5;text-align:center;margin-top:4px}
+
+  /* ---------- подсказка/тост/указатель ---------- */
+  #prompt{position:fixed;left:50%;bottom:74px;transform:translateX(-50%) translateY(8px);
+    z-index:7;padding:8px 18px;font-size:11px;letter-spacing:2px;color:#cfe8f5;
+    opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;
+    background:rgba(8,22,32,.82);border:1px solid rgba(90,200,240,.35);border-radius:3px;
+    box-shadow:0 0 24px rgba(50,170,220,.25)}
+  #prompt.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  #prompt b{color:#0b1420;background:#6fe0ff;padding:1px 7px;border-radius:2px;font-weight:700}
+  #prompt span{color:#89b6c9;font-size:10px}
+
+  #toast{position:fixed;left:50%;top:150px;transform:translateX(-50%) translateY(-6px);
+    z-index:7;font-size:11px;letter-spacing:2px;color:#ffd98a;opacity:0;
+    transition:opacity .25s,transform .25s;pointer-events:none;
+    text-shadow:0 0 16px rgba(255,180,60,.6)}
+  #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  #waypoint{position:fixed;left:0;top:0;z-index:6;pointer-events:none;
+    display:flex;flex-direction:column;align-items:center;gap:2px;
+    transform:translate(-100px,-100px);transition:opacity .3s;will-change:transform}
+  #wpArrow{font-size:13px;color:#7fe4ff;line-height:1;transition:transform .12s linear;
+    text-shadow:0 0 12px rgba(90,220,255,.8)}
+  #wpDist{font-size:9px;letter-spacing:1.6px;color:#9fd4e8;white-space:nowrap;
+    text-shadow:0 0 10px rgba(0,0,0,.8)}
+
+  /* ---------- общие оверлеи ---------- */
+  .overlay{position:fixed;inset:0;z-index:15;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at 50% 40%,rgba(4,12,20,.74),rgba(2,5,10,.95));
+    transition:opacity .3s ease,visibility .3s;padding:24px}
+  .overlay.hidden{opacity:0;visibility:hidden;pointer-events:none}
+  /* миниигра «на весь экран»: камера встаёт в заранее собранный кадр
+     (site.shot), а карточка уходит вниз узкой полосой — механизм виден целиком */
+  .overlay.focus{background:linear-gradient(180deg,
+    rgba(3,8,14,0) 0%,rgba(3,8,14,0) 48%,rgba(3,8,14,.45) 70%,rgba(2,5,10,.9) 100%);
+    justify-content:center;align-items:flex-end;padding:0 18px 14px}
+  .overlay.focus .card{width:min(880px,96vw);max-height:44vh;overflow:auto;
+    background:rgba(6,16,24,.88);backdrop-filter:blur(4px);padding:18px 22px 16px}
+  .overlay.focus .card h1,.overlay.focus .card h2{font-size:19px;letter-spacing:5px}
+  .overlay.focus .card p{font-size:12.5px;margin-bottom:8px}
+  .overlay.focus .mini{gap:18px}
+  /* переводчик: нужны все шесть строк сразу — своя высота и ширина */
+  #translate.focus .card{width:min(1020px,96vw);max-height:84vh;overflow:auto}
+  .overlay.focus .primary{margin-top:6px}
+  .card{width:min(680px,calc(100vw - 48px));max-height:calc(100vh - 60px);overflow:auto;
+    padding:30px 34px 26px;position:relative}
+  .card h1{margin:0 0 6px;font-size:24px;letter-spacing:9px;font-weight:600;color:#eafcff;
+    text-shadow:0 0 28px rgba(80,200,255,.5)}
+  .card h2{margin:0 0 4px;font-size:17px;letter-spacing:4px;font-weight:600;color:#eafcff}
+  .card .eyebrow{font-size:9.5px;letter-spacing:4px;color:#ff9f52;margin-bottom:8px}
+  .card .sect{font-size:10px;letter-spacing:5px;color:#ff9f52;margin-bottom:20px}
+  .card p{font-size:13px;line-height:1.7;color:#b8d6e4;margin:0 0 12px;letter-spacing:.2px}
+  .card ul{margin:0 0 18px;padding:0;list-style:none;font-size:11.5px;line-height:2;
+    color:#93bccd;letter-spacing:.6px;columns:2;column-gap:26px}
+  .card ul b{color:#eafcff;display:inline-block;min-width:74px;font-weight:600}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px}
+  .close{background:transparent;border:1px solid rgba(90,190,230,.3);color:#9dc9dd;
+    font-family:inherit;font-size:10px;letter-spacing:2px;padding:7px 12px;border-radius:3px;
+    cursor:pointer;white-space:nowrap}
+  .close:hover{border-color:rgba(130,230,255,.7);color:#eafcff}
+  button.primary,button.secondary{font-family:inherit;cursor:pointer;border-radius:4px;
+    padding:12px 20px;font-size:12px;letter-spacing:2.6px;border:1px solid rgba(90,190,230,.45);
+    background:linear-gradient(100deg,rgba(24,66,90,.95),rgba(12,32,46,.7));color:#eafcff}
+  button.primary:hover,button.secondary:hover{border-color:rgba(130,230,255,.8);
+    background:linear-gradient(100deg,rgba(32,86,116,.98),rgba(14,38,54,.8))}
+  button.ghost{background:transparent;border:1px solid rgba(90,190,230,.22);color:#9dc9dd;
+    font-family:inherit;cursor:pointer;border-radius:4px;padding:11px 18px;
+    font-size:11px;letter-spacing:2.2px}
+  button.choice{display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;
+    margin-top:10px;padding:13px 16px;cursor:pointer;border-radius:4px;
+    background:linear-gradient(100deg,rgba(20,52,72,.85),rgba(10,26,38,.6));
+    border:1px solid rgba(90,190,230,.28);color:#eafcff;font-family:inherit;
+    transition:border-color .18s,background .18s,transform .12s}
+  button.choice:hover{border-color:rgba(130,230,255,.7);transform:translateX(3px);
+    background:linear-gradient(100deg,rgba(28,74,100,.95),rgba(12,32,46,.7))}
+  button.choice b{font-size:12.5px;letter-spacing:2.4px;font-weight:600}
+  button.choice span{font-size:10px;letter-spacing:1.6px;color:#7fa9bd}
+
+  /* ---------- диалог ---------- */
+  #dialog{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:14;
+    width:min(720px,calc(100vw - 48px));padding:16px 20px 14px;opacity:1}
+  #dialog.hidden{display:none}
+  #dlgName{font-size:10px;letter-spacing:4px;color:#ff9f52;margin-bottom:8px}
+  #dlgText{font-size:14px;line-height:1.7;color:#e6f6ff;letter-spacing:.2px;min-height:3.4em}
+  #dlgStep{font-size:9px;letter-spacing:2.4px;color:#6f9aae;text-align:right;margin-top:8px}
+
+  /* ---------- миниигры ---------- */
+  .mini{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+  .tr-script{font-size:40px;letter-spacing:10px;color:#9ff2e6;text-shadow:0 0 24px rgba(90,220,255,.5);
+    padding:16px 6px;text-align:center}
+  .tr-caption{font-size:9.5px;letter-spacing:2.4px;color:#6f9aae;text-align:center}
+  .tr-translated{font-size:12.5px;line-height:1.7;color:#cfe8f5;margin-top:12px;
+    border-left:2px solid rgba(140,236,223,.4);padding-left:12px}
+  .tr-row{display:block;margin-bottom:9px;padding-bottom:8px;
+    border-bottom:1px solid rgba(90,190,230,.1)}
+  .tr-head{display:flex;align-items:baseline;gap:10px;margin-bottom:5px}
+  /* ---------- три вертикальные металлические пластины ---------- */
+  #translate.focus .card{width:min(1180px,97vw);max-height:92vh;overflow:auto}
+  .tr-plates{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:14px}
+  .tr-text{display:flex;flex-direction:column}
+  .tr-text h4{font-size:9.5px;letter-spacing:3px;color:#93b3c2;margin:0 0 6px;text-align:center}
+  .tr-plate{position:relative;aspect-ratio:0.6;padding:10px 8px;border-radius:3px;overflow:hidden;
+    background:
+      linear-gradient(150deg,#46565f,#1e2a31 40%,#37474f 66%,#141d22 92%),
+      repeating-linear-gradient(94deg,rgba(255,255,255,.035) 0 1px,rgba(0,0,0,.07) 1px 3px);
+    border:1px solid rgba(160,190,200,.28);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 -3px 12px rgba(0,0,0,.65),
+      0 10px 24px rgba(0,0,0,.45)}
+  /* ржавчина и сколы — оверлей, знаков не касается */
+  .tr-plate::after{content:'';position:absolute;inset:0;pointer-events:none}
+  /* пустой слот: ни металла, ни надписей — только место под пластину */
+  .tr-plate.tr-plate--empty{background:none;border:1px dashed rgba(120,180,205,.22);
+    box-shadow:none;clip-path:none;border-radius:4px}
+  .tr-plate.tr-plate--empty::after{display:none}
+  /* у каждой пластины своя ржавчина: пятна, потёки и вздутия в разных местах */
+  .tr-plate.dmg-a::after{
+    background:
+      radial-gradient(58% 38% at 84% 94%, rgba(168,92,40,.62), transparent 68%),
+      radial-gradient(26% 18% at 12% 10%, rgba(140,78,34,.38), transparent 72%),
+      radial-gradient(18% 26% at 92% 40%, rgba(120,66,30,.30), transparent 74%),
+      radial-gradient(14% 12% at 40% 78%, rgba(150,86,40,.22), transparent 70%)}
+  .tr-plate.dmg-b::after{
+    background:
+      radial-gradient(52% 30% at 18% 6%, rgba(172,96,44,.58), transparent 66%),
+      radial-gradient(30% 22% at 74% 20%, rgba(140,78,34,.30), transparent 72%),
+      radial-gradient(22% 30% at 56% 88%, rgba(126,70,32,.34), transparent 72%),
+      radial-gradient(10% 10% at 30% 46%, rgba(160,90,42,.20), transparent 70%)}
+  .tr-plate.dmg-c::after{
+    background:
+      linear-gradient(0deg, rgba(148,82,36,.46) 0%, rgba(148,82,36,.10) 16%, transparent 30%),
+      radial-gradient(34% 40% at 8% 52%, rgba(166,92,40,.44), transparent 72%),
+      radial-gradient(20% 16% at 62% 34%, rgba(130,72,32,.26), transparent 72%),
+      radial-gradient(14% 14% at 88% 12%, rgba(120,66,30,.22), transparent 70%)}
+  /* обломаны неаккуратно: рваные зигзагом кромки */
+  .tr-plate.dmg-a{clip-path:polygon(0 0,100% 0,100% 73%,96.5% 76.5%,99.5% 80.5%,
+    94% 83.5%,97.5% 87.5%,91% 90.5%,95% 93.5%,88.5% 96.5%,91% 100%,0 100%)}
+  .tr-plate.dmg-b{clip-path:polygon(6.5% 0,3.5% 2.4%,5.5% 5%,1.6% 7.6%,4.2% 10.2%,
+    0 13%,0 100%,100% 100%,100% 0)}
+  .tr-plate.dmg-c{clip-path:polygon(0 0,85% 0,89.5% 2.2%,86% 4.4%,91.5% 6.4%,
+    100% 9.5%,100% 100%,9.5% 100%,12.5% 97.2%,8% 94.8%,11.5% 92%,7% 89.2%,
+    12% 86.4%,0 83%)}
+  .tr-plate__grid{position:relative;z-index:1;height:100%;
+    display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(5,1fr);
+    place-items:center;gap:0;line-height:1}
+  /* знак: гравировка, НЕ кнопка — ни рамки, ни фона; все знаки одинаковые */
+  .tr-g{appearance:none;-webkit-appearance:none;background:none;border:0;padding:0;margin:0;
+    font-family:'TangutSign',Georgia,serif;font-size:clamp(30px,4.6vh,46px);line-height:1;
+    color:#cfe6f0;cursor:pointer;text-shadow:0 1px 1px rgba(0,0,0,.9),0 0 8px rgba(120,200,225,.16);
+    transition:color .15s,text-shadow .15s,transform .15s}
+  .tr-g:nth-child(3n+2){transform:rotate(.8deg)}
+  .tr-g:nth-child(4n+1){transform:rotate(-.9deg)}
+  .tr-g:hover{color:#ffffff;text-shadow:0 0 12px rgba(170,255,235,.75)}
+  /* знак с введённым переводом и знак с неверным переводом */
+  .tr-g.has{color:#e8fffb;text-shadow:0 0 10px rgba(120,240,220,.45),0 1px 1px rgba(0,0,0,.9)}
+  .tr-g.bad{color:#ff8f6a;text-shadow:0 0 14px rgba(255,110,70,.85),0 1px 1px rgba(0,0,0,.9)}
+  .tr-g.bad.has{color:#ff8f6a}
+  /* журнал внизу — одна-две строки «знак — перевод» */
+  .tr-journal-bar{border-top:1px solid rgba(90,190,230,.18);padding-top:9px;margin-bottom:10px}
+  /* две колонки: пластины слева, журнал справа — место не пустует */
+  .tr-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,290px);
+    gap:16px;align-items:start;margin-bottom:12px}
+  .tr-col--plates{min-width:0}
+  .tr-cols .tr-plates{margin-bottom:0}
+  .tr-col--journal{border-left:1px solid rgba(90,190,230,.16);padding-left:14px}
+  .tr-journal--grid{display:grid;grid-template-columns:1fr;gap:6px}
+  .tr-journal--grid .tr-row{display:flex;align-items:baseline;gap:9px;padding:5px 8px;
+    border:1px solid rgba(90,190,230,.14);border-radius:6px;background:rgba(8,20,28,.5);
+    cursor:pointer;transition:border-color .15s,background .15s}
+  .tr-journal--grid .tr-row:hover{border-color:rgba(159,242,230,.45);background:rgba(12,30,40,.7)}
+  .tr-journal--grid .tr-note-input{flex:1;min-width:0;background:rgba(6,16,22,.55);color:#eafcff;
+    border:1px solid rgba(90,190,230,.22);border-radius:5px;padding:4px 7px;
+    font-family:inherit;font-size:12px}
+  .tr-journal--grid .tr-note-input:focus{outline:none;border-color:#8cecdf;background:rgba(6,16,22,.9)}
+  .tr-journal--grid .tr-note-input::placeholder{color:#5a7f92}
+  .tr-journal--grid .tr-note-input:disabled{opacity:.5;cursor:not-allowed}
+  .tr-journal--grid .tr-note{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12.5px;color:#eafcff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .tr-journal--grid .tr-note.empty{color:#5a7f92}
+  .tr-journal--grid .tr-row.bad .tr-note{color:#ff8f6a}
+  .tr-journal--grid .tr-row.bad{border-color:rgba(255,120,90,.5)}
+  .tr-journal.tr-journal--grid .tr-glyph{font-size:30px;text-shadow:0 0 10px rgba(90,220,255,.35)}
+  .tr-journal--grid .tr-row.has{box-shadow:inset 0 0 0 1px rgba(159,242,230,.25)}
+  .tr-journal--grid .tr-row.has .tr-glyph{color:#e8fffb}
+  @media (max-width:720px){
+    .tr-cols{grid-template-columns:1fr}
+    .tr-col--journal{border-left:0;padding-left:0;border-top:1px solid rgba(90,190,230,.16);padding-top:10px}
+  }
+  /* перевод: шесть слотов «знак + значение» */
+  .tr-task{margin-bottom:12px}
+  .tr-slots{display:grid;gap:5px}
+  .tr-slot{display:grid;grid-template-columns:16px 74px 1fr 16px;align-items:center;gap:8px;
+    background:rgba(8,20,28,.45);border:1px solid rgba(90,190,230,.16);border-radius:8px;padding:4px 9px}
+  .tr-slot__n{font:600 10px ui-monospace,monospace;color:#5f8798}
+  .tr-slot select{width:100%;background:rgba(6,16,22,.72);color:#9ff2e6;
+    border:1px solid rgba(90,190,230,.22);border-radius:6px;padding:1px 3px;
+    font-family:'TangutSign',Georgia,serif;font-size:19px;line-height:1.2;cursor:pointer}
+  .tr-slot input{background:rgba(6,16,22,.72);color:#eafcff;border:1px solid rgba(90,190,230,.22);
+    border-radius:6px;padding:5px 8px;font-size:13px}
+  .tr-slot select:focus,.tr-slot input:focus{outline:none;border-color:#8cecdf;background:rgba(6,16,22,.92)}
+  .tr-slot__res{font-size:13px;text-align:center;line-height:1}
+  .tr-slot.ok .tr-slot__res{color:#9ff2e6}
+  .tr-slot.bad{border-color:rgba(255,120,90,.45)}
+  .tr-slot.bad .tr-slot__res{color:#ff8a6a}
+  .tr-journal-title{display:block;font-size:9px;letter-spacing:4px;color:#ff9f52;margin-bottom:6px}
+  /* журнал игрока на экране расшифровки: видно, что мы сами записали */
+  .tr-log{display:none;margin-bottom:12px;border:1px solid rgba(120,220,255,.25);
+    border-radius:10px;padding:9px 12px 7px;background:rgba(10,26,36,.55)}
+  .tr-log.on{display:block}
+  .tr-log__head{font-size:9px;letter-spacing:2.4px;color:#ff9f52;margin-bottom:7px}
+  .tr-log__head span{letter-spacing:.4px;color:#6d94a5;margin-left:6px}
+  .tr-log__rows{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 16px}
+  .tr-log__row{display:flex;align-items:baseline;gap:8px;padding-bottom:3px;
+    border-bottom:1px dotted rgba(120,200,230,.16)}
+  .tr-log__g{font-family:'TangutSign',Georgia,serif;font-size:19px;line-height:1;color:#9ff2e6;
+    text-shadow:0 0 10px rgba(90,220,255,.35)}
+  .tr-log__v{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#eafcff;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tr-log__v.empty{color:#5a7f92;font-style:italic}
+  .tr-journal{display:flex;flex-wrap:wrap;gap:4px 18px}
+  .tr-journal .tr-row{display:flex;align-items:baseline;gap:7px;padding:2px 0;border:0}
+  .tr-journal .tr-glyph{font-family:'TangutSign',Georgia,serif;font-size:19px;line-height:1;
+    color:#9ff2e6;width:auto;text-shadow:0 0 10px rgba(90,220,255,.35)}
+  .tr-journal .tr-row.ok .tr-glyph{color:#b4ffee}
+  .tr-journal .tr-row.ok .tr-note{color:#d9fff6}
+  .tr-journal .tr-row.now .tr-note{color:#9ff2e6;font-style:normal}
+  .tr-journal .tr-note{font-size:11.5px;color:#8fb8cb;white-space:nowrap}
+  .tr-journal .tr-input{width:132px;background:rgba(10,26,38,.92);color:#eafcff;
+    border:1px solid rgba(90,190,230,.3);border-radius:4px;padding:4px 7px;
+    font-family:inherit;font-size:11.5px}
+  .tr-journal .tr-input:focus{outline:none;border-color:rgba(159,242,230,.75)}
+  .tr-journal .tr-row.now .tr-input{border-color:rgba(159,242,230,.6)}
+  .tr-journal .tr-mark{color:#8cf2d9;font-size:11px}
+  /* строки журнала: свои выбранные знаки, у каждого — удаление */
+  .tr-journal .tr-row[data-glyph]{cursor:pointer;border-radius:4px;padding:2px 4px}
+  .tr-journal .tr-row[data-glyph]:hover{background:rgba(90,190,230,.09)}
+  .tr-journal .tr-row.empty{opacity:.35}
+  .tr-journal .tr-row.empty .tr-glyph{color:#8fb8cb}
+  .tr-journal .tr-del{background:none;border:0;color:#6f9aae;cursor:pointer;
+    font-family:inherit;font-size:11px;line-height:1;padding:0 2px}
+  .tr-journal .tr-del:hover{color:#ff9f6e}
+  /* всплывающее окошко ввода у знака */
+  .tr-pop.hidden{display:none}
+  .tr-pop{position:fixed;z-index:30;width:250px;padding:12px;border-radius:8px;
+    background:rgba(8,20,28,.97);border:1px solid rgba(120,200,230,.45);
+    box-shadow:0 12px 30px rgba(0,0,0,.55)}
+  .tr-pop__glyph{font-family:'TangutSign',Georgia,serif;font-size:40px;line-height:1;color:#b4ffee;
+    text-align:center;margin-bottom:4px}
+  .tr-pop__hint{font-size:10.5px;letter-spacing:.6px;color:#8fb8cb;text-align:center;margin-bottom:8px;min-height:1.2em}
+  .tr-pop input{width:100%;box-sizing:border-box;background:rgba(10,26,38,.95);color:#eafcff;
+    border:1px solid rgba(90,190,230,.35);border-radius:4px;padding:8px 9px;font-family:inherit;font-size:12px}
+  .tr-pop input:focus{outline:none;border-color:rgba(159,242,230,.75)}
+  .tr-pop__row{display:flex;gap:6px;margin-top:8px}
+  /* кнопки окошка — только иконки, чтобы не занимать место словами */
+  .tr-pop__ok,.tr-pop__no,.tr-pop__del{font-family:inherit;font-size:14px;line-height:1;
+    cursor:pointer;width:34px;height:30px;display:grid;place-items:center;
+    border-radius:4px;border:1px solid rgba(90,190,230,.35);
+    background:rgba(16,42,54,.9);color:#d7f2fb;transition:background .15s,border-color .15s}
+  .tr-pop__del{border-color:rgba(230,140,90,.45);background:rgba(46,24,16,.85);color:#ffcaa8}
+  .tr-pop__del.hidden{display:none}
+  .tr-pop__del:hover{background:rgba(72,34,20,.95)}
+  .tr-pop__ok{flex:1;border-color:rgba(159,242,230,.6)}
+  .tr-pop__no{margin-left:auto}
+  .tr-pop__ok:hover,.tr-pop__no:hover{background:rgba(24,66,80,.95)}  select{flex:1;background:rgba(10,26,38,.9);color:#eafcff;border:1px solid rgba(90,190,230,.3);
+    border-radius:3px;padding:9px 10px;font-family:inherit;font-size:12px;letter-spacing:1.4px}
+  /* схема знака: пиктограммы вместо слов */
+  .tr-note{font-size:11.5px;line-height:1.5;color:#a8cfe0;font-style:italic}
+  .tr-note.empty{opacity:.45;font-style:normal}
+  .tr-picks{display:flex;gap:5px}
+  .tr-pick{width:42px;height:42px;padding:3px;display:grid;place-items:center;cursor:pointer;
+    background:rgba(10,26,38,.85);border:1px solid rgba(90,190,230,.22);border-radius:8px;
+    color:#cfe8f5;transition:border-color .15s,box-shadow .15s,background .15s}
+  .tr-pick svg{width:26px;height:26px;display:block}
+  .tr-pick:hover{border-color:rgba(130,230,255,.55)}
+  .tr-pick.on{border-color:#9ff2e6;background:rgba(20,60,74,.92);
+    box-shadow:0 0 0 1px rgba(159,242,230,.5),0 0 16px rgba(90,220,255,.25)}
+  .sig-burn{color:#ffb45a}
+  .sig-dark{color:#7d93a1}
+  #trStatus{font-size:10.5px;letter-spacing:2px;color:#8fb8cb;margin:14px 0 16px;min-height:1.4em}
+
+
+  #sigCanvas{width:100%;height:150px;display:block;border-radius:4px;
+    background:linear-gradient(180deg,rgba(12,26,36,.9),rgba(6,16,24,.9));
+    border:1px solid rgba(90,190,230,.2);margin:6px 0 14px}
+  .slider{display:grid;grid-template-columns:74px 1fr;align-items:center;gap:12px;margin-bottom:10px;
+    font-size:10px;letter-spacing:2px;color:#8fb8cb}
+  input[type=range]{width:100%;accent-color:#8cecdf}
+
+  #artCanvas{width:100%;height:260px;display:block;border-radius:4px;
+    background:radial-gradient(ellipse at 50% 40%,rgba(24,52,68,.55),rgba(6,14,20,.9));
+    border:1px solid rgba(90,190,230,.18);cursor:grab}
+
+  #mapWrap{display:flex;justify-content:center}
+  #mapCanvas{border-radius:6px;background:rgba(6,16,24,.6)}
+
+  #journalList article{border-left:2px solid rgba(140,236,223,.35);padding-left:14px;margin-bottom:16px}
+  #journalList h4{font-size:10px;letter-spacing:3px;color:#ff9f52;font-weight:600;margin-bottom:6px}
+  #journalList p{font-size:12.5px;line-height:1.7;color:#b8d6e4}
+
+  /* ---------- тексты переводчика ---------- */
+  .tr-text{border-left:2px solid rgba(140,236,223,.35);padding:2px 0 2px 12px;margin-bottom:14px}
+  .tr-text h4{font-size:9.5px;letter-spacing:2.6px;color:#ff9f52;font-weight:600;margin-bottom:7px}
+  .tr-glyphs{font-size:26px;letter-spacing:10px;color:#9ff2e6;text-shadow:0 0 18px rgba(90,220,255,.45)}
+  .tr-glyphs.muted{opacity:.45}
+  /* прочитанные надписи: знаки крупно, перевод под ними */
+  #translate .card{width:min(1220px,96vw)}
+  #translate.reading .card{width:min(1220px,98vw);max-height:94vh;overflow:auto}
+  #translate.reading .tr-items{opacity:.55}
+  .tr-decoded .tr-glyphs{font-size:clamp(22px,2.2vw,30px);letter-spacing:10px;line-height:1.7;
+    word-break:break-all}
+  /* перевод печатается как вывод ИИ-системы: терминал, курсор, посимвольно */
+  .tr-decoded .tr-term{margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:12.5px;line-height:1.75;color:#9ff2e6;white-space:pre-wrap;word-break:break-word;
+    padding-left:14px;position:relative}
+  .tr-decoded .tr-term::before{content:'›';position:absolute;left:0;color:#ff9f52}
+  .tr-decoded .tr-caret{display:inline-block;width:.55em;height:1em;margin-left:1px;
+    vertical-align:-.12em;background:#9ff2e6;animation:trCaret 1s steps(1) infinite}
+  .tr-decoded .tr-term.done .tr-caret{display:none}
+  .tr-decoded .tr-genre{color:#8fb8cb;letter-spacing:1.6px;font-size:9px}
+  @keyframes trCaret{0%,49%{opacity:1}50%,100%{opacity:0}}
+  /* тангутские знаки: свои кегли и единая семья шрифта */
+  .tr-glyph,.tr-glyphs,.tr-script,.ls-demo,.ls-solved .sg{font-family:'TangutSign',Georgia,serif}
+  .tr-script{font-size:34px;letter-spacing:6px}
+  #signsBlock.hidden{display:none}
+  #signStrip{display:flex;gap:5px;margin:5px 0 3px}
+  #signStrip .sg{font-family:'TangutSign',Georgia,serif;font-size:19px;line-height:1.15;
+    color:#3f5a67;border:1px solid rgba(90,190,230,.16);border-radius:4px;padding:2px 4px}
+  #signStrip .sg.on{color:#9ff2e6;border-color:rgba(140,236,223,.45);
+    text-shadow:0 0 12px rgba(90,220,255,.5)}
+
+  /* окно находки и инвентарь письмен */
+  .find-card{width:min(760px,96vw)}
+  .find-plate{margin:10px 0 12px;display:grid;place-items:center}
+  .find-plate .tr-plate{width:min(300px,60vw);aspect-ratio:0.6}
+  .find-note{font-size:12.5px;line-height:1.7;color:#b8d6e4}
+  .find-actions{display:flex;gap:10px;align-items:center}
+  .inv-list{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+  .inv-item{display:flex;align-items:center;gap:12px;padding:9px 12px;cursor:pointer;
+    background:rgba(10,26,38,.7);border:1px solid rgba(90,190,230,.25);border-radius:6px;
+    color:#dff3fb;font-family:inherit;font-size:12px;letter-spacing:1.2px;text-align:left}
+  .inv-item:hover{border-color:rgba(159,242,230,.6);background:rgba(20,52,64,.85)}
+  .inv-item .ig{display:block;width:52px;height:52px;flex:0 0 52px;object-fit:contain;
+    filter:drop-shadow(0 3px 6px rgba(0,0,0,.5))}
+  .inv-item .ig svg{display:none}
+  .inv-item.locked{opacity:.45;cursor:default}
+  .inv-item.locked:hover{border-color:rgba(90,190,230,.25);background:rgba(10,26,38,.7)}
+  .tr-items{margin-bottom:12px}
+  .tr-items .inv-item{cursor:default;font-size:11.5px;line-height:1.5;letter-spacing:.4px}
+  .tr-items .inv-item .it-name{font-weight:600;letter-spacing:1.2px}
+  .tr-items .inv-item .it-text{color:#9fc0d0;display:block;margin-top:2px}
+  .tr-text p{font-size:12px;line-height:1.65;color:#cfe8f5;margin-top:8px}
+  .ls-demo{display:flex;gap:26px;align-items:center;justify-content:center;font-size:46px;color:#9ff2e6;
+    text-shadow:0 0 22px rgba(90,220,255,.5);padding:10px 0}
+  .ls-solved{display:flex;gap:22px;font-size:15px;color:#9ff2e6;margin-top:14px}
+  .ls-solved b{color:#eafcff;letter-spacing:1.5px}
+  .ls-solved .sg{font-size:30px;vertical-align:-4px;margin-right:4px}
+  .ls-solved small{display:block;margin-top:5px;font-size:9px;letter-spacing:1.2px;color:#7fa8ba}
+
+  /* ---------- гибель мира: белая пелена и слова ---------- */
+  #whiteout{position:fixed;inset:0;z-index:17;pointer-events:none;opacity:0;
+    background:radial-gradient(circle at 50% 45%,#ffffff 0%,#f4f8fa 55%,#e2eaee 100%)}
+  /* чёрная шторка перехода «машина → механизм» и обратно */
+  #cut{position:fixed;inset:0;z-index:26;pointer-events:none;opacity:0;background:#04070b;
+    transition:opacity .18s linear}
+  #defeat{background:transparent;z-index:19}
+  .end-words{text-align:center;color:#26333b;padding:0 26px;
+    animation:endFade 2s ease both}
+  .end-kicker{font-size:9px;letter-spacing:7px;color:#93a7b1;margin-bottom:16px}
+  .end-title{font-size:clamp(20px,4.6vw,38px);letter-spacing:12px;font-weight:300;
+    text-indent:12px}
+  .end-btn{margin-top:38px;background:none;border:1px solid rgba(38,51,59,.32);
+    color:#26333b;padding:11px 24px;font-family:inherit;font-size:10px;
+    letter-spacing:4px;cursor:pointer;transition:background .25s,border-color .25s}
+  .end-btn:hover{background:rgba(38,51,59,.06);border-color:rgba(38,51,59,.6)}
+  @keyframes endFade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* ---------- загрузка ---------- */
+  #loading{position:fixed;inset:0;z-index:20;background:#05080d;display:flex;
+    align-items:center;justify-content:center;font-size:11px;letter-spacing:6px;color:#7fd0e8;
+    transition:opacity .6s ease}
+  #loading.hidden{opacity:0;pointer-events:none}
+
+  /* ---------- свой курсор в стиле игры (перекрывает все ранние cursor:pointer) ---------- */
+  :root{
+    --cursor-main:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cg fill='none' stroke='%239ff2e6' stroke-width='1.3' stroke-linecap='round'%3E%3Cpath d='M14 2.5v5.5M14 20v5.5M2.5 14H8M20 14h5.5'/%3E%3Ccircle cx='14' cy='14' r='7.2' opacity='.45'/%3E%3C/g%3E%3Ccircle cx='14' cy='14' r='1.9' fill='%23ff9f52'/%3E%3C/svg%3E") 14 14, default;
+    --cursor-hot:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cg fill='none' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M14 2v6M14 20v6M2 14h6M20 14h6' stroke='%23ffffff'/%3E%3Ccircle cx='14' cy='14' r='8' stroke='%239ff2e6'/%3E%3C/g%3E%3Crect x='12.4' y='12.4' width='3.2' height='3.2' transform='rotate(45 14 14)' fill='%23ff9f52'/%3E%3C/svg%3E") 14 14, pointer;
+  }
+  html,body,body *{cursor:var(--cursor-main)!important}
+  button,a,select,label,.close,.primary,#mapCanvas,.tr-g,
+  .tr-row[data-glyph],.inv-item,.tr-del,.tr-pop__ok,.tr-pop__del,.tr-pop__no{cursor:var(--cursor-hot)!important}
+  input,textarea{cursor:text!important}
+  canvas.locked{cursor:none!important}
+
+  /* ---------- выбор курсора (пауза → ВИД КУРСОРА) ---------- */
+  #cursorPick .card{max-height:calc(100vh - 48px);overflow:auto}
+  #cursorList{display:grid;gap:7px}
+  .cur-row{display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+    background:rgba(10,24,32,.6);border:1px solid rgba(90,190,230,.2);
+    border-radius:5px;padding:8px 11px;font-family:inherit;color:#dff2fb;
+    transition:border-color .15s,background .15s}
+  .cur-row:hover{border-color:rgba(159,242,230,.55);background:rgba(16,36,46,.9)}
+  .cur-row.is-on{border-color:rgba(255,159,82,.7);background:rgba(38,26,14,.55)}
+  .cur-pic{flex:0 0 34px;width:34px;height:34px;display:grid;place-items:center;
+    background:#0b141b;border:1px solid rgba(90,190,230,.16);border-radius:4px}
+  .cur-pic svg{width:26px;height:26px;overflow:visible}
+  .cur-meta{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .cur-meta b{font-size:11.5px;letter-spacing:2.4px;font-weight:400;color:#dff2fb}
+  .cur-meta i{font-style:normal;font-size:10.5px;line-height:1.4;color:#87a6b6}
+  .cur-ok{margin-left:auto;font-size:13px;color:#ff9f52;opacity:0;transition:opacity .15s}
+  .cur-row.is-on .cur-ok{opacity:1}
+</style>
+<!-- Вид курсора: варианты в js/cursors.js, выбор — ?cursor=<id>, смотреть в tools/cursor-preview.html -->
+<script src="./js/cursors.js"></script>
+</head>
+<body>
+
+<div id="app"></div>
+<div id="vignette"></div>
+<div id="fogveil"></div>
+<div id="damage"></div>
+
+<div id="title">
+  <b>АВАРИС</b>
+  <span>ПО ТУ СТОРОНУ БУРИ · 2132</span>
+</div>
+
+<div id="storm" class="panel">
+  <div class="row"><span>ДО БУРИ</span><b id="stormTime">8 ч 00 м</b></div>
+  <div class="bar"><i id="stormFill"></i></div>
+</div>
+
+<div id="objectiveBox">
+  <div id="objective">Расшифруйте письмена</div>
+  <div id="objectiveSub">Прочитайте знаки у трёх древностей · 0 / 3</div>
+</div>
+
+<div id="stats" class="panel">
+  <div id="signsBlock" class="hidden">
+    <div class="row"><span class="lbl">Знаки</span><b id="wordsVal">0 / 6</b></div>
+    <div id="signStrip"></div>
+  </div>
+  <div class="row"><span class="lbl">Ахолы</span><b id="aholasVal">0 / 6</b></div>
+  <div class="row" style="margin-top:6px"><span class="lbl">Прочность</span><b id="hpVal">100%</b></div>
+  <div class="bar hp"><i id="hpFill"></i></div>
+  <div class="row" style="margin-top:6px"><span class="lbl">Энергия</span></div>
+  <div class="bar"><i id="energyFill"></i></div>
+  <div class="row" style="margin-top:6px"><span class="lbl">Раскопки</span><b id="digVal">0 / 10</b></div>
+</div>
+
+<div id="hud" class="panel">
+  <div>ВРЕМЯ <b id="clock">04:00</b></div>
+  <div>БИОМ <b id="biome">—</b></div>
+  <div>КООРД <b id="coords">—</b></div>
+  <div>СКОРОСТЬ <b id="speed">0</b> м/с</div>
+</div>
+
+<div id="radarWrap">
+  <canvas id="radar" width="150" height="150"></canvas>
+  <div id="radarLabel">СКАНЕР 150 м</div>
+</div>
+
+<div id="keys">
+  <kbd>W</kbd>/<kbd>S</kbd> газ · <kbd>A</kbd>/<kbd>D</kbd> руль · <kbd>Shift</kbd> форсаж<br>
+  <kbd>E</kbd> действие · <kbd>F</kbd> копать · <kbd>M</kbd> карта · <kbd>J</kbd> журнал · <kbd>N</kbd> звук · <kbd>Esc</kbd> пауза<br>
+  мышь — обзор · колесо — зум
+</div>
+
+<div id="findCard" class="overlay hidden">
+  <div class="card panel find-card">
+    <div class="eyebrow">НАЙДЕНЫ ПИСЬМЕНА</div>
+    <h2 id="findTitle">Пластина I</h2>
+    <div class="find-plate" id="findPlate"></div>
+    <p id="findNote" class="find-note"></p>
+    <div class="find-actions">
+      <button class="primary" id="findOk">ЗАКРЫТЬ</button>
+      <button class="close" id="findInv">Инвентарь · I</button>
+    </div>
+  </div>
+</div>
+
+<div id="inv" class="overlay hidden">
+  <div class="card panel">
+    <div class="eyebrow">ИНВЕНТАРЬ</div>
+    <h2>ПИСЬМЕНА</h2>
+    <div id="invList" class="inv-list"></div>
+    <button class="close" id="invClose">Закрыть · Esc</button>
+  </div>
+</div>
+
+<div id="cut"></div>
+<div id="prompt"></div>
+<div id="toast"></div>
+
+<div id="waypoint">
+  <div id="wpArrow">▲</div>
+  <div id="wpDist">0 м</div>
+</div>
+
+<!-- ================= диалог ================= -->
+<div id="dialog" class="panel hidden">
+  <div id="dlgName">МИРА</div>
+  <div id="dlgText"></div>
+  <div id="dlgStep">1 / 1 · пробел</div>
+</div>
+
+<!-- ================= миниигра 1: письмена ================= -->
+<div id="translate" class="overlay hidden">
+  <div class="card panel">
+    <div class="head">
+      <div>
+        <div class="eyebrow">ИНВЕНТАРЬ · I</div>
+        <h2>АРТЕФАКТЫ И ЖУРНАЛ</h2>
+      </div>
+      <button class="close" id="trClose">Закрыть · Esc</button>
+    </div>
+    <div class="tr-items" id="trItemsWrap">
+      <span class="tr-journal-title">ПРЕДМЕТЫ</span>
+      <div id="trItems"></div>
+    </div>
+    <div class="tr-cols">
+      <div class="tr-col tr-col--plates"><div class="tr-plates" id="trTexts"></div></div>
+      <aside class="tr-col tr-col--journal">
+        <span class="tr-journal-title">ЖУРНАЛ · ваши заметки</span>
+        <div id="trWords" class="tr-journal tr-journal--grid"></div>
+      </aside>
+    </div>
+    <div id="trStatus">Нажмите на знак пластины и впишите его перевод.</div>
+    <button class="primary" id="trSubmit">ОТПРАВИТЬ ИИ НА РАСШИФРОВКУ</button>
+  </div>
+</div>
+
+<div id="trPop" class="tr-pop hidden">
+  <div class="tr-pop__glyph" id="trPopGlyph">𗼐</div>
+  <div class="tr-pop__hint" id="trPopHint"></div>
+  <input id="trPopInput" maxlength="40" placeholder="значение своими словами…">
+  <div class="tr-pop__row">
+    <button type="button" class="tr-pop__ok" id="trPopSave" title="Сохранить">✓</button>
+    <button type="button" class="tr-pop__del hidden" id="trPopDel" title="Убрать перевод">🗑</button>
+    <button type="button" class="tr-pop__no" id="trPopClose" title="Отмена">✕</button>
+  </div>
+</div>
+
+<!-- ================= язык: назвать значения знаков ================= -->
+<div id="lesson" class="overlay hidden">
+  <div class="card panel">
+    <div class="head">
+      <div>
+        <div class="eyebrow">ЯЗЫК АВАРИСЦЕВ</div>
+        <h2 id="lsTitle">ДРЕВНИЕ ВРАТА</h2>
+      </div>
+      <button class="close" id="lsClose">Закрыть · Esc</button>
+    </div>
+    <div id="lsBody"></div>
+    <div id="lsStatus">Сопоставьте два знака с двумя состояниями</div>
+    <button class="primary" id="lsSubmit">ЗАПИСАТЬ ЗНАЧЕНИЯ</button>
+  </div>
+</div>
+
+<!-- ================= артефакт ================= -->
+<div id="artifact" class="overlay hidden">
+  <div class="card panel">
+    <div class="head">
+      <div>
+        <div class="eyebrow">03 / ОСМОТР НАХОДКИ</div>
+        <h2>ФАЗОВЫЙ КЛЮЧ</h2>
+      </div>
+      <button class="close" id="artClose">Закрыть · Esc</button>
+    </div>
+    <canvas id="artCanvas"></canvas>
+    <p style="margin-top:14px">Слои — не украшение: это регуляторы энергии. Ключ откликается на импульсы
+      к востоку от храма. Похоже, он открывал что-то, что аварисцы предпочли спрятать.</p>
+    <p style="font-size:10.5px;color:#6f9aae">Модель можно вращать мышью.</p>
+  </div>
+</div>
+
+<!-- ================= миниигра 3: аномалия ================= -->
+<div id="signal" class="overlay hidden">
+  <div class="card panel">
+    <div class="head">
+      <div>
+        <div class="eyebrow">04 / РЕЗОНАНС</div>
+        <h2>ПОРОГ АНОМАЛИИ</h2>
+      </div>
+    </div>
+    <p>Зелёная волна — ваш ключ, фиолетовая — аномалия. Совместите обе оси и удержите совпадение
+       не меньше двух секунд.</p>
+    <canvas id="sigCanvas"></canvas>
+    <div class="slider"><span>ЧАСТОТА</span><input id="sigFreq" type="range" min="0.6" max="4.6" step="0.01" value="1.2"></div>
+    <div class="slider"><span>ФАЗА</span><input id="sigPhase" type="range" min="0" max="6.28" step="0.01" value="0"></div>
+    <div class="dig-line"><span id="sigStatus">Подстройте частоту и фазу</span>
+      <b id="sigScore">0%</b></div>
+    <div class="bar"><i id="sigBar" style="width:0%"></i></div>
+  </div>
+</div>
+
+<!-- ================= карта ================= -->
+<div id="map" class="overlay hidden">
+  <div class="card panel" style="width:min(760px,calc(100vw - 48px))">
+    <div class="head">
+      <div>
+        <div class="eyebrow">НАВИГАТОР</div>
+        <h2>КАРТА СЕКТОРА</h2>
+      </div>
+      <button class="close" id="mapClose">Закрыть · Esc</button>
+    </div>
+    <div id="mapWrap"><canvas id="mapCanvas"></canvas></div>
+    <p style="font-size:10.5px;color:#6f9aae;margin-top:12px">
+      Клик по точке задаёт цель для указателя. Пунктирный круг — завеса финала.
+    </p>
+  </div>
+</div>
+
+<!-- ================= журнал ================= -->
+<div id="journal" class="overlay hidden">
+  <div class="card panel">
+    <div class="head">
+      <div>
+        <div class="eyebrow">ПОЛЕВОЙ ЖУРНАЛ</div>
+        <h2>ОТКРЫТИЯ ЭКСПЕДИЦИИ</h2>
+      </div>
+      <button class="close" id="journalClose">Закрыть · Esc</button>
+    </div>
+    <div id="journalList"></div>
+  </div>
+</div>
+
+<!-- ================= пауза ================= -->
+<div id="pause" class="overlay hidden">
+  <div class="card panel" style="width:min(460px,calc(100vw - 48px))">
+    <div class="eyebrow">ПАУЗА</div>
+    <h2 style="margin-bottom:8px">ЭКСПЕДИЦИЯ ПРИОСТАНОВЛЕНА</h2>
+    <p id="pauseNote" style="font-size:11px;color:#8fb8cb">Буря остановлена</p>
+    <div style="display:grid;gap:10px;margin-top:18px">
+      <button class="primary" id="pauseResume">ПРОДОЛЖИТЬ</button>
+      <button class="secondary" id="pauseSave">СОХРАНИТЬ</button>
+      <!-- выбор курсора сейчас выключен: в игре всегда «Точка».
+           Вернуть — убрать hidden и сделать CURSOR_LOCK = null в js/cursors.js -->
+      <button class="ghost" id="pauseCursor" hidden>ВИД КУРСОРА</button>
+      <button class="ghost" id="pauseRestart">НАЧАТЬ ЗАНОВО</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= выбор курсора ================= -->
+<div id="cursorPick" class="overlay hidden">
+  <div class="card panel" style="width:min(560px,calc(100vw - 48px))">
+    <div class="eyebrow">КУРСОР</div>
+    <h2 style="margin-bottom:6px">ВИД УКАЗАТЕЛЯ</h2>
+    <p style="font-size:11px;line-height:1.5;color:#8fb8cb;margin-bottom:14px">
+      Нажмите строку — курсор сменится сразу и останется таким в следующий раз.
+    </p>
+    <div id="cursorList"></div>
+    <button class="secondary" id="cursorDone" style="margin-top:14px">ГОТОВО</button>
+  </div>
+</div>
+
+<!-- ================= поражение ================= -->
+<div id="whiteout"></div>
+
+<div id="defeat" class="overlay hidden">
+  <div class="end-words">
+    <div class="end-kicker">ВЕЛИКАЯ БУРЯ</div>
+    <div class="end-title">СЕКТОР ПОТЕРЯН</div>
+    <button class="end-btn" id="defeatRestart">новая экспедиция</button>
+  </div>
+</div>
+
+<!-- ================= финал ================= -->
+<div id="ending" class="overlay hidden">
+  <div class="card panel">
+    <div class="eyebrow">СЕРДЦЕ БУРИ</div>
+    <h1 id="endingTitle">АРХИВ</h1>
+    <p id="endingText" style="white-space:pre-line"></p>
+    <div id="endingChoices">
+      <button class="choice" id="endingFree">
+        <b>ОТКЛЮЧИТЬ ШПИЛЬ</b>
+        <span>Планета увидит звёзды. Экспедиция останется внизу навсегда</span>
+      </button>
+      <button class="choice" id="endingLeave">
+        <b>ВЕРНУТЬСЯ НА «ОДИССЕЙ»</b>
+        <span>Забрать артефакты. Буря останется, правда — тоже</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= интро ================= -->
+<div id="intro" class="overlay">
+  <div class="card panel">
+    <h1>АВАРИС</h1>
+    <div class="sect">ПО ТУ СТОРОНУ БУРИ · 2132</div>
+    <p>Человечество вышло за пределы Солнечной системы. Разведывательный корабль «Одиссей»
+       вышел на орбиту Авариса: сигнал этой планеты повторяет всплески, которые ловили ещё
+       примитивные антенны Земли.</p>
+    <p>На поверхность спустились трое — археолог Мира Соколова, физик Лев Орлов
+       и бортинженер Нина Кравцова. Остальной экипаж ждёт на орбите. Но планету накрывает
+       <b>Великая буря</b> — и, по всем расчётам, именно она когда-то уничтожила здесь жизнь.</p>
+    <p>Язык аварисцев не подписан. Значения знаков придётся вывести: на планете остались
+       механизмы с двумя состояниями — врата, очаг и противовес. Слова с них станут ключами
+       к переводчику, а три расшифрованных текста скажут, где копать.</p>
+    <p>Буря не ждёт. Но в минииграх и диалогах её отсчёт останавливается — думать можно спокойно.</p>
+    <ul>
+      <li><b>W / S</b> газ и назад</li>
+      <li><b>A / D</b> поворот</li>
+      <li><b>Shift</b> форсаж</li>
+      <li><b>Space</b> тормоз</li>
+      <li><b>E</b> действие</li>
+      <li><b>F</b> копать шурф <span style="opacity:.6">· до десяти за экспедицию, тратит энергию</span></li>
+      <li><b>M</b> карта · <b>J</b> журнал</li>
+      <li><b>Esc</b> пауза</li>
+      <li><b>R</b> поставить ровер</li>
+    </ul>
+    <button class="primary" id="startBtn">
+      НАЧАТЬ ЭКСПЕДИЦИЮ
+      <span style="display:block;font-size:9.5px;letter-spacing:1.6px;color:#7fa9bd;margin-top:4px">
+        Продолжить сохранённую, если она есть
+      </span>
+    </button>
+  </div>
+</div>
+
+<div id="loading">ГЕНЕРАЦИЯ ПЛАНЕТЫ…</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

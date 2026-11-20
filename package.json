@@ -1,0 +1,12 @@
+{
+  "name": "avaris-game",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "АВАРИС · По ту сторону бури — игра-исследование на three.js",
+  "scripts": {
+    "serve": "python3 -m http.server 8213 --bind 127.0.0.1",
+    "test": "node --test tools/test-story.mjs",
+    "check": "node --check js/main.js"
+  }
+}

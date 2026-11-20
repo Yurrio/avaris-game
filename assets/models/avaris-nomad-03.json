@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "name": "Кочевник-03",
+    "length": 6.4,
+    "width": 3.4,
+    "roofHeight": 3.02,
+    "heightWithAntenna": 3.7,
+    "wheelDiameter": 1.46,
+    "clearance": 0.42,
+    "cabinWidth": 2.16,
+    "cabinLength": 3.35,
+    "seatWidth": 0.58,
+    "capacity": 3,
+    "humanHeight": 1.78
+  },
+  "bounds": {
+    "x": 3.400000000149012,
+    "y": 3.7134649348062787,
+    "z": 6.400000001490116
+  },
+  "meshCount": 904,
+  "triangles": 41680,
+  "units": "metres",
+  "notes": "Prototype with physical seats and three seated scale mannequins. Roof, cabin frame and glazing are separate groups. CLI export retains geometry wear and PBR materials. Browser export additionally embeds the procedural roughness texture; the viewer-only bump effect is not exported."
+}

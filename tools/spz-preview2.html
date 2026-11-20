@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>SPZ · просмотр</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1016;overflow:hidden;font:12px/1.4 ui-monospace,monospace;color:#9ff2e6}
+  canvas{display:block}
+  #hud{position:fixed;left:10px;top:10px;background:#000a;padding:8px 10px;border:1px solid #9ff2e633;white-space:pre;z-index:2}
+  #hud b{color:#fff}
+</style>
+<script type="importmap">{ "imports": { "three": "../vendor/three.module.js" } }</script>
+</head>
+<body>
+<div id="hud">загрузка…</div>
+<script type="module">
+import * as THREE from 'three';
+import { DropInViewer } from '../vendor/splats/gaussian-splats-3d.module.js';
+
+const hud = document.getElementById('hud');
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1016);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.05, 5000);
+camera.position.set(4, 3, 8);
+camera.lookAt(0, 1, 0);
+
+const grid = new THREE.GridHelper(20, 20, 0x2a6a63, 0x16302e);
+scene.add(grid);
+scene.add(new THREE.AxesHelper(1.5));
+
+// drop-in: сплат-меш живёт внутри нашей сцены и рисуется нашим рендерером
+const viewer = new DropInViewer({
+  gpuAcceleratedSort: true,
+  sharedMemoryForWorkers: false,
+  halfPrecisionCovariancesOnGPU: true,
+  integerBasedSort: true,
+  dynamicScene: false,
+  sphericalHarmonicsDegree: 0,
+});
+scene.add(viewer);
+
+const t0 = performance.now();
+let status = 'ok';
+try {
+  await viewer.addSplatScene('../assets/models/avaris-ruins.splat', {
+    showLoadingUI: false,
+    progressiveLoad: false,
+    splatAlphaRemovalThreshold: 1,
+  });
+} catch (e) {
+  status = 'ошибка загрузки: ' + e.message;
+}
+const loadMs = Math.round(performance.now() - t0);
+
+const mesh = viewer.viewer.splatMesh;
+const box = mesh?.boundingBox;
+let info = `статус: ${status}\nзагрузка: ${loadMs} мс\nsplats: ${mesh?.getSplatCount?.() ?? '?'}`;
+if (box && isFinite(box.min.x)) {
+  const s = new THREE.Vector3().subVectors(box.max, box.min);
+  const c = new THREE.Vector3().addVectors(box.max, box.min).multiplyScalar(0.5);
+  const r = Math.max(s.x, s.y, s.z);
+  info += `\nbounds ${box.min.toArray().map(n => n.toFixed(2))} … ${box.max.toArray().map(n => n.toFixed(2))}`;
+  info += `\nsize   ${s.toArray().map(n => n.toFixed(2))}`;
+  info += `\ncenter ${c.toArray().map(n => n.toFixed(2))}`;
+  camera.position.set(c.x + r * 0.9, c.y + r * 0.45, c.z + r * 0.9);
+  camera.lookAt(c);
+  grid.position.y = box.min.y;
+  window.__spz = { size: s.toArray(), center: c.toArray(), numSplats: mesh.getSplatCount() };
+} else {
+  info += '\nbounds: нет данных';
+  window.__spz = { size: null };
+}
+hud.innerHTML = `<b>avaris-ruins.spz</b>\n${info}`;
+
+let drag = false, px = 0, py = 0;
+renderer.domElement.addEventListener('pointerdown', e => { drag = true; px = e.clientX; py = e.clientY; });
+addEventListener('pointerup', () => drag = false);
+addEventListener('pointermove', e => {
+  if (!drag) return;
+  const pivot = new THREE.Vector3();
+  camera.getWorldDirection(pivot);
+  camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), (e.clientX - px) * 0.005);
+  px = e.clientX; py = e.clientY;
+});
+addEventListener('wheel', e => camera.position.multiplyScalar(1 + Math.sign(e.deltaY) * 0.08), { passive: true });
+
+function loop() {
+  requestAnimationFrame(loop);
+  renderer.render(scene, camera);
+}
+loop();
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+window.__view = { camera, scene, viewer, renderer, THREE };
+window.__fit = (cx, cy, cz, r, ly) => {
+  camera.position.set(cx + r * 0.75, cy + r * 0.35, cz + r * 0.75);
+  camera.lookAt(cx, ly ?? cy, cz);
+  grid.position.y = cy - r * 0.3;
+};
+window.__ready = true;
+</script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Просмотр модели</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e9e9e9; }
+  #info { position: fixed; left: 12px; top: 12px; font: 12px/1.5 ui-monospace, monospace; color: #333; }
+</style>
+</head>
+<body>
+<div id="info">загрузка…</div>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three.module.js" } }
+</script>
+<script type="module">
+/* Просмотр одной модели из assets/models: ?m=имя.glb&a=45&e=20&paint=1
+   Нужен, чтобы покраску и масштаб проверять до вставки в игру. */
+import * as THREE from '../vendor/three.module.js';
+import { GLTFLoader } from '../vendor/loaders/GLTFLoader.js';
+
+const q = new URLSearchParams(location.search);
+const file = q.get('m') || 'phase-core.glb';
+const yaw = Number(q.get('a') || 35) * Math.PI / 180;
+const pitch = Number(q.get('e') || 18) * Math.PI / 180;
+const flat = q.get('flat') === '1';
+const paint = q.get('paint') === '1';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xe9e9e9);
+
+const cam = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 500);
+
+scene.add(new THREE.HemisphereLight(0xdfe8ef, 0x3a3a34, 0.55));
+const key = new THREE.DirectionalLight(0xfff2dc, 1.35);
+key.position.set(3, 5, 4);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x9fc4ff, 0.45);
+rim.position.set(-4, 2, -3);
+scene.add(rim);
+
+new GLTFLoader().load(`../assets/models/${file}`, (gltf) => {
+  const root = gltf.scene;
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxSide = Math.max(size.x, size.y, size.z);
+
+  if (flat || paint) {
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      o.geometry.computeVertexNormals();
+      o.material = new THREE.MeshStandardMaterial({
+        color: 0x7a7568, roughness: 0.95, metalness: 0.04, flatShading: true,
+      });
+    });
+  }
+  if (paint) paintByRule(root, box);
+
+  scene.add(root);
+  const dist = maxSide * 2.4;
+  cam.position.set(
+    center.x + Math.sin(yaw) * Math.cos(pitch) * dist,
+    center.y + Math.sin(pitch) * dist,
+    center.z + Math.cos(yaw) * Math.cos(pitch) * dist
+  );
+  cam.lookAt(center);
+
+  const info = document.createElement('div');
+  info.style.cssText = 'position:fixed;left:12px;top:12px;font:12px/1.5 monospace;color:#333';
+  info.textContent = `${file} · ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} м`;
+  document.body.appendChild(info);
+
+  renderer.render(scene, cam);
+  window.__preview = { scene, cam, renderer, root };
+}, undefined, (e) => {
+  document.body.textContent = 'ошибка загрузки: ' + e;
+});
+
+/* Та же покраска, что и в игре: снизу тёмная корка, сверху пыль,
+   наклонные грани — средний камень, глубина — циан. */
+function paintByRule(root, box) {
+  const h = Math.max(1e-3, box.max.y - box.min.y);
+  const dark = new THREE.Color(0x3c3a30);
+  const mid = new THREE.Color(0x6f6b58);
+  const light = new THREE.Color(0x8b866c);
+  const glow = new THREE.Color(0x53e0ff);
+
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const g = o.geometry;
+    const pos = g.attributes.position;
+    const nor = g.attributes.normal;
+    const colors = new Float32Array(pos.count * 3);
+    const c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const t = (pos.getY(i) - box.min.y) / h;         // 0 низ … 1 верх
+      const up = nor ? nor.getY(i) : 0;                // 1 = смотрит вверх
+      c.copy(mid).lerp(light, THREE.MathUtils.clamp(up, 0, 1) * 0.85);
+      if (t < 0.18) c.lerp(dark, (0.18 - t) / 0.18);   // корка у земли
+      if (t > 0.8) c.lerp(light, (t - 0.8) / 0.2 * 0.4); // пыль сверху
+      const n = 0.94 + 0.12 * Math.random();           // лёгкий разброс
+      colors[i * 3] = c.r * n;
+      colors[i * 3 + 1] = c.g * n;
+      colors[i * 3 + 2] = c.b * n;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    o.material = new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.96, metalness: 0.03, flatShading: true,
+    });
+  });
+  return glow;
+}
+
+addEventListener('resize', () => {
+  cam.aspect = innerWidth / innerHeight;
+  cam.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  if (window.__preview) renderer.render(scene, cam);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>SPZ · просмотр (Viewer)</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1016;overflow:hidden;font:12px/1.4 ui-monospace,monospace;color:#9ff2e6}
+  canvas{display:block}
+  #hud{position:fixed;left:10px;top:10px;background:#000a;padding:8px 10px;border:1px solid #9ff2e633;white-space:pre;z-index:2}
+</style>
+<script type="importmap">{ "imports": { "three": "../vendor/three.module.js" } }</script>
+</head>
+<body>
+<div id="hud">загрузка…</div>
+<script type="module">
+import * as THREE from 'three';
+import { Viewer, SceneRevealMode } from '../vendor/splats/gaussian-splats-3d.module.js';
+
+const hud = document.getElementById('hud');
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1016);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 2000);
+camera.position.set(14, 7.4, 17.4);
+camera.lookAt(-0.96, 0, 2.39);
+
+const grid = new THREE.GridHelper(40, 40, 0x2a6a63, 0x16302e);
+grid.position.y = -5.6;
+scene.add(grid);
+
+const q = new URLSearchParams(location.search);
+const gpuSort = q.get('gpu') !== '0';
+
+const viewer = new Viewer({
+  selfDrivenMode: false,
+  useBuiltInControls: false,
+  renderer,
+  camera,
+  threeScene: scene,
+  gpuAcceleratedSort: gpuSort,
+  sharedMemoryForWorkers: false,
+  integerBasedSort: true,
+  dynamicScene: false,
+  sphericalHarmonicsDegree: 0,
+});
+
+const t0 = performance.now();
+await viewer.addSplatScene('../assets/models/avaris-ruins.splat', {
+  showLoadingUI: false,
+  sceneRevealMode: SceneRevealMode.Instant,
+  splatAlphaRemovalThreshold: 1,
+  progressiveLoad: false,
+});
+const loadMs = Math.round(performance.now() - t0);
+
+const m = viewer.splatMesh;
+window.__view = { viewer, camera, renderer, scene, THREE };
+window.__stat = () => ({
+  splats: m.getSplatCount(),
+  inst: m.geometry.instanceCount,
+  draws: renderer.info.render.calls,
+});
+
+hud.innerHTML = `загрузка ${loadMs} мс · gpuSort ${gpuSort}\nsplats ${m.getSplatCount()}\ninst ${m.geometry.instanceCount}`;
+
+function loop() {
+  requestAnimationFrame(loop);
+  viewer.update();
+  viewer.render();
+}
+loop();
+window.__ready = true;
+</script>
+</body>
+</html>
