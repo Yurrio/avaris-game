@@ -415,9 +415,10 @@
   .tr-glyph,.tr-glyphs,.tr-script,.ls-demo,.ls-solved .sg{font-family:'TangutSign',Georgia,serif}
   .tr-script{font-size:34px;letter-spacing:6px}
   #signsBlock.hidden{display:none}
-  #signStrip{display:flex;gap:5px;margin:5px 0 3px}
+  #signStrip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin:5px 0 3px}
   #signStrip .sg{font-family:'TangutSign',Georgia,serif;font-size:19px;line-height:1.15;
-    color:#3f5a67;border:1px solid rgba(90,190,230,.16);border-radius:4px;padding:2px 4px}
+    display:grid;place-items:center;min-width:0;padding:2px 0;overflow:hidden;
+    color:#3f5a67;border:1px solid rgba(90,190,230,.16);border-radius:4px}
   #signStrip .sg.on{color:#9ff2e6;border-color:rgba(140,236,223,.45);
     text-shadow:0 0 12px rgba(90,220,255,.5)}
 

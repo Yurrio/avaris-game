@@ -2250,13 +2250,13 @@ export class World {
           const mat = mat4.clone();
           balls.rock.push(mat);
           cols.rock.push(col.getHex());
-          // камень крупнее гальки — преграда; радиус по видимому силуэту
-          // (геометрия — додекаэдр радиуса 1, масштаб по XZ = s)
-          // Мелкие (s ≤ 1.2) не держат, а подбрасывают: bump = трамплин
-          if (s > 0.8) {
+          // Камни теперь лежат на поверхности, поэтому порог ниже: почти всё,
+          // что видно как валун, держит. Совсем мелкая галька (s ≤ 0.55)
+          // остаётся проезжаемой — это «трамплин», а не преграда.
+          if (s > 0.55) {
             this.propObstacles.push({
-              pos: pos.clone(), r: Math.max(0.35, s * 0.85),
-              kind: 'rock', bump: s <= 1.2, m: mat,
+              pos: pos.clone(), r: Math.max(0.3, s * 0.85),
+              kind: 'rock', bump: s <= 1.0, m: mat,
             });
           }
         } else if (kind === 'crystal') {
