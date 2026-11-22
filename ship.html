@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>XR-7 · Борт «Туманная котловина»</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#02040a;
+            font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  #app{position:fixed;inset:0}
+  #hud{position:fixed;left:14px;top:12px;color:#bcd4ea;font-size:12px;line-height:1.55;
+       text-shadow:0 1px 3px #000;pointer-events:none;font-family:ui-monospace,monospace}
+  #hud b{color:#8fd3ff;letter-spacing:1px}
+  #hud .room{color:#ffd88a;font-weight:600}
+  #minimap{position:fixed;right:14px;top:14px;width:220px;height:220px;border:1px solid #2b3a4a;
+           border-radius:10px;background:rgba(6,10,16,.92);box-shadow:0 6px 24px rgba(0,0,0,.6)}
+  #legend{position:fixed;right:14px;top:246px;color:#9fb6c9;font-size:11px;line-height:1.65;
+          text-shadow:0 1px 2px #000;font-family:ui-monospace,monospace}
+  #legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px;vertical-align:middle}
+  #crosshair{position:fixed;left:50%;top:50%;width:6px;height:6px;margin:-3px 0 0 -3px;
+             background:rgba(255,255,255,.75);border-radius:50%;pointer-events:none;z-index:10;
+             box-shadow:0 0 8px rgba(140,200,255,.6)}
+  #start{position:fixed;inset:0;display:grid;place-items:center;background:rgba(2,4,10,.94);
+         color:#cfe3f5;z-index:50;transition:opacity .3s;text-align:center;padding:20px;cursor:pointer}
+  #start.hidden{opacity:0;pointer-events:none}
+  #start h1{font-size:26px;letter-spacing:3px;margin:0 0 8px;color:#8fd3ff}
+  #start p{font-size:13px;line-height:1.8;color:#8aa6bf;margin:0}
+  #start .hint{margin-top:18px;color:#ffd88a;font-size:12px}
+  #loading{position:fixed;inset:0;display:grid;place-items:center;background:#02040a;color:#8fd3ff;
+           font-size:18px;letter-spacing:3px;z-index:100;transition:opacity .5s;text-align:center}
+  #loading small{display:block;margin-top:10px;color:#4a6a86;font-size:12px;letter-spacing:1px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="crosshair"></div>
+
+<div id="hud">
+  <b>XR-7 · БОРТ «ТУМАННАЯ КОТЛОВИНА»</b><br>
+  Отсек: <span class="room" id="roomName">—</span><br>
+  Координаты: <span id="pos">—</span><br>
+  <span style="color:#5d7a94">WASD — ходьба · Shift — бег · мышь — обзор · ESC — пауза</span>
+</div>
+
+<canvas id="minimap" width="220" height="220"></canvas>
+<div id="legend"></div>
+
+<div id="start" class="hidden">
+  <div>
+    <h1>XR-7 · «ТУМАННАЯ КОТЛОВИНА»</h1>
+    <p>Бортовой журнал: связь с экипажем потеряна.<br>
+       Жизнеобеспечение — аварийный режим.<br>
+       Обойдите отсеки, проверьте реактор, найдите архив.</p>
+    <div class="hint">Клик — войти · ESC — выйти</div>
+  </div>
+</div>
+
+<div id="loading">ГЕНЕРАЦИЯ КОРАБЛЯ…<small>100 × 100 ячеек · процедурная планировка</small></div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+/* ============================ 1. ПЛАНИРОВКА ============================ */
+const GRID_W = 100, GRID_H = 100, CELL = 1.2, WALL_H = 4.0, PLAYER_R = 0.35;
+
+const ROOMS = [
+  { name:'ГРУЗОВОЙ ТРЮМ', x0: 8, y0: 8, x1:26, y1:26, floor:0x2a241c, wall:0x3a3228, light:0xffa855 },
+  { name:'ИНЖЕНЕРНЫЙ',    x0: 8, y0:32, x1:26, y1:56, floor:0x242424, wall:0x343430, light:0xffb840 },
+  { name:'РЕАКТОР',       x0: 8, y0:62, x1:26, y1:88, floor:0x14242a, wall:0x24343a, light:0x44ffaa },
+  { name:'ЖИЛОЙ ОТСЕК',   x0:42, y0: 8, x1:60, y1:26, floor:0x2a2620, wall:0x3a3630, light:0xffdcaa },
+  { name:'КАЮТ-КОМПАНИЯ', x0:42, y0:32, x1:60, y1:56, floor:0x2a2824, wall:0x3a3832, light:0xffe8c0 },
+  { name:'МЕДБЛОК',       x0:42, y0:62, x1:60, y1:88, floor:0x1e262a, wall:0x2e363c, light:0xaaffff },
+  { name:'МОСТИК',        x0:72, y0:25, x1:92, y1:75, floor:0x161e30, wall:0x262e40, light:0x6699ff },
+];
+const CORRIDORS = [
+  {x0:14,y0:26,x1:20,y1:32},{x0:14,y0:56,x1:20,y1:62},
+  {x0:48,y0:26,x1:54,y1:32},{x0:48,y0:56,x1:54,y1:62},
+  {x0:26,y0:14,x1:42,y1:18},{x0:26,y0:42,x1:42,y1:46},
+  {x0:26,y0:73,x1:42,y1:77},{x0:60,y0:48,x1:72,y1:52},
+];
+
+const cellType = new Uint8Array(GRID_W * GRID_H);        // 0 стена, 1 комната, 2 коридор
+const roomAt   = new Int16Array(GRID_W * GRID_H).fill(-1);
+function carve(x0,y0,x1,y1,t,r=-1){
+  for(let y=Math.max(0,y0);y<=Math.min(GRID_H-1,y1);y++)
+    for(let x=Math.max(0,x0);x<=Math.min(GRID_W-1,x1);x++){
+      const i=y*GRID_W+x; cellType[i]=t; if(r>=0) roomAt[i]=r;
+    }
+}
+ROOMS.forEach((r,i)=>carve(r.x0,r.y0,r.x1,r.y1,1,i));
+CORRIDORS.forEach(c=>carve(c.x0,c.y0,c.x1,c.y1,2));
+
+const w2 = g => (g - GRID_W/2) * CELL;
+const ROOM_C = ROOMS.map(r=>({ x:w2((r.x0+r.x1)/2), z:w2((r.y0+r.y1)/2) }));
+
+/* ============================ 2. СЦЕНА ============================ */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x02040a);
+scene.fog = new THREE.FogExp2(0x0a1520, 0.0075);
+
+const camera = new THREE.PerspectiveCamera(72, innerWidth/innerHeight, 0.05, 400);
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.getElementById('app').appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x5a6c80, 0.9));
+scene.add(new THREE.HemisphereLight(0x8899aa, 0x121820, 0.6));
+
+/* ============================ 3. ГЕОМЕТРИЯ ============================ */
+function planeQuad(w,h,color,tint=1,gain=1){
+  const g = new THREE.PlaneGeometry(w,h);
+  const c = new THREE.Color(color).multiplyScalar(gain);
+  const n = g.attributes.position.count;
+  const arr = new Float32Array(n*3);
+  for(let i=0;i<n;i++){ arr[i*3]=c.r*tint; arr[i*3+1]=c.g*tint; arr[i*3+2]=c.b*tint; }
+  g.setAttribute('color', new THREE.BufferAttribute(arr,3));
+  return g;
+}
+
+function buildFloor(){
+  const geos=[];
+  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
+    const i=y*GRID_W+x; if(!cellType[i]) continue;
+    const wx=(x-GRID_W/2+0.5)*CELL, wz=(y-GRID_H/2+0.5)*CELL;
+    const col = roomAt[i]>=0 ? ROOMS[roomAt[i]].floor : 0x262630;
+    const band = ((Math.floor(x/4)+Math.floor(y/4)) % 2) ? 1.0 : 0.68;
+    const t = (1 + (((x*7+y*13)%7)-3)*0.03) * band;
+    const g = planeQuad(CELL,CELL,col,t,2.3);
+    g.rotateX(-Math.PI/2); g.translate(wx,0,wz); geos.push(g);
+  }
+  return mergeGeometries(geos);
+}
+
+function buildCeiling(){
+  const geos=[];
+  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
+    const i=y*GRID_W+x; if(!cellType[i]) continue;
+    const wx=(x-GRID_W/2+0.5)*CELL, wz=(y-GRID_H/2+0.5)*CELL;
+    const g = planeQuad(CELL,CELL,0x181820,1,2.8);
+    g.rotateX(Math.PI/2); g.translate(wx,WALL_H,wz); geos.push(g);
+  }
+  return mergeGeometries(geos);
+}
+
+function buildWalls(){
+  const geos=[];
+  const dirs=[[-1,0,'x-'],[1,0,'x+'],[0,-1,'z-'],[0,1,'z+']];
+  for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){
+    const i=y*GRID_W+x; if(!cellType[i]) continue;
+    const wx=(x-GRID_W/2+0.5)*CELL, wz=(y-GRID_H/2+0.5)*CELL;
+    const col = roomAt[i]>=0 ? ROOMS[roomAt[i]].wall : 0x262630;
+    for(const [dx,dz,d] of dirs){
+      const nx=x+dx, ny=y+dz;
+      const solid = nx<0||nx>=GRID_W||ny<0||ny>=GRID_H ? true : cellType[ny*GRID_W+nx]===0;
+      if(!solid) continue;
+      const g = new THREE.PlaneGeometry(CELL,WALL_H);
+      const c = new THREE.Color(col).multiplyScalar(2.6);
+      const n = g.attributes.position.count, pos=g.attributes.position;
+      const arr = new Float32Array(n*3);
+      for(let k=0;k<n;k++){
+        const yy = pos.getY(k);
+        let s = 0.5 + (yy/WALL_H)*0.5;
+        if(yy > 1.05 && yy < 1.25) s *= 0.45;   // панельный шов
+        if(yy > 3.5) s *= 0.6;                  // теневой карниз
+        arr[k*3]=c.r*s; arr[k*3+1]=c.g*s; arr[k*3+2]=c.b*s;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(arr,3));
+      let px=wx, pz=wz, ry=0;
+      if(d==='x-'){ px=wx-CELL/2; ry= Math.PI/2; }
+      else if(d==='x+'){ px=wx+CELL/2; ry=-Math.PI/2; }
+      else if(d==='z-'){ pz=wz-CELL/2; ry=0; }
+      else { pz=wz+CELL/2; ry=Math.PI; }
+      g.rotateY(ry); g.translate(px,WALL_H/2,pz); geos.push(g);
+    }
+  }
+  return mergeGeometries(geos);
+}
+
+const vcMat = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.82, metalness:0.2 });
+scene.add(new THREE.Mesh(buildFloor(), vcMat));
+scene.add(new THREE.Mesh(buildWalls(), vcMat));
+scene.add(new THREE.Mesh(buildCeiling(), new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.95, metalness:0.05 })));
+
+/* свет: по лампе на отсек + потолочные полосы */
+ROOMS.forEach((r,i)=>{
+  const c = ROOM_C[i];
+  const L = new THREE.PointLight(r.light, 42, 62, 1.0);
+  L.position.set(c.x, WALL_H-0.6, c.z); scene.add(L);
+  const L2 = new THREE.PointLight(r.light, 10, 30, 1.2);
+  L2.position.set(c.x, 2.4, c.z); scene.add(L2);
+  const strip = new THREE.Mesh(
+    new THREE.PlaneGeometry(CELL*5, CELL*0.45),
+    new THREE.MeshBasicMaterial({ color:r.light, transparent:true, opacity:0.32 })
+  );
+  strip.rotation.x = Math.PI/2;
+  strip.position.set(c.x, WALL_H-0.03, c.z);
+  scene.add(strip);
+});
+
+/* ============================ 4. ХЕЛПЕРЫ ПРОПОВ ============================ */
+const mat = (color,o={}) => new THREE.MeshStandardMaterial({
+  color: new THREE.Color(color).multiplyScalar(1.15), roughness:o.rough??0.8, metalness:o.metal??0.15,
+  emissive:o.emissive??0x000000, emissiveIntensity:o.ei??0,
+  transparent:o.transparent??false, opacity:o.opacity??1
+});
+const box = (w,h,d,color,o) => new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat(color,o));
+const cyl = (rt,rb,h,color,o) => new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,o?.seg??12), mat(color,o));
+const sph = (r,color,o) => new THREE.Mesh(new THREE.SphereGeometry(r,16,12), mat(color,o));
+const put = (parent,m,x,y,z,ry=0) => { m.position.set(x,y,z); m.rotation.y=ry; parent.add(m); return m; };
+
+const animated = [];   // {obj, kind, ph, base}
+const art = (o,kind,ph=0) => { animated.push({obj:o,kind,ph,base:{x:o.position.x,y:o.position.y,z:o.position.z}}); };
+
+/* ============================ 5. ОТСЕКИ ============================ */
+function roomGroup(i){
+  const g = new THREE.Group();
+  g.position.set(ROOM_C[i].x, 0, ROOM_C[i].z);   // .copy() с {x,z} даёт y=NaN
+  scene.add(g);
+  return g;
+}
+
+/* ---- МОСТИК (24 x 60) ---- */
+function buildBridge(){
+  const g = roomGroup(6);
+  put(g, box(8,0.3,8,0x2a3242,{metal:0.6,rough:0.5}), 0,0.15,0);
+
+  // капитанское кресло
+  put(g, cyl(0.9,1.1,0.5,0x1a2030,{metal:0.7,rough:0.4}), 0,0.55,0);
+  put(g, box(1.4,0.25,1.2,0x2b3648,{metal:0.5}), 0,0.85,0);
+  put(g, box(1.4,1.5,0.25,0x2b3648,{metal:0.5}), 0,1.6,0.6);
+  put(g, box(0.5,0.9,0.15,0x2b3648,{metal:0.5}), -0.75,1.5,-0.1);
+  put(g, box(0.5,0.9,0.15,0x2b3648,{metal:0.5}),  0.75,1.5,-0.1);
+
+  // пультовая дуга
+  for(const z of [-7,-3.5,0,3.5,7]){
+    const c = new THREE.Group();
+    put(c, box(1.6,0.9,1.1,0x222a38,{metal:0.6}), 0,0.45,0);
+    const scr = box(1.35,0.05,0.8,0x0a1420,{emissive:0x3aa0ff,ei:1.6});
+    scr.rotation.x = -0.35; put(c, scr, 0,0.95,0);
+    put(c, box(1.6,0.06,0.35,0x141c28), 0,0.9,-0.4);
+    c.position.set(4.6,0,z); c.rotation.y = -0.35; g.add(c);
+  }
+
+  // главный экран на кормовой стене (+X)
+  const screen = new THREE.Mesh(
+    new THREE.PlaneGeometry(14,7),
+    new THREE.MeshBasicMaterial({ color:0x123a55, transparent:true, opacity:0.95 })
+  );
+  screen.rotation.y = -Math.PI/2;
+  screen.position.set(11.4, 2.2, 0);
+  g.add(screen);
+  const bars = [];
+  for(let i=0;i<7;i++){
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(1.2,1),
+      new THREE.MeshBasicMaterial({ color:0x7fd3ff, transparent:true, opacity:0.55 }));
+    b.rotation.y = -Math.PI/2;
+    b.position.set(11.3, 1.2, -5.2 + i*1.75);
+    g.add(b); bars.push(b); art(b,'bar',i*0.7);
+  }
+
+  // голо-стол
+  put(g, cyl(2.2,2.6,0.9,0x1c2432,{metal:0.7,rough:0.4}), -7,0.45,-14);
+  const holo = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2,0), mat(0x66ddff,{emissive:0x2a90c0,ei:2,transparent:true,opacity:0.75}));
+  put(g, holo, -7,2.1,-14); art(holo,'spin',0);
+  put(g, new THREE.Mesh(new THREE.TorusGeometry(2.4,0.06,6,40), mat(0x66ddff,{emissive:0x2a90c0,ei:1.6,transparent:true,opacity:0.5})), -7,2.1,-14);
+
+  // артефакт на пьедестале (находка)
+  put(g, cyl(0.7,0.9,1.2,0x2a2a34,{metal:0.6}), -8,0.6,-26);
+  const rel = new THREE.Mesh(new THREE.OctahedronGeometry(0.6,0), mat(0x9fe0ff,{emissive:0x3f9fd8,ei:2.4}));
+  put(g, rel, -8,1.9,-26); art(rel,'float',1.1);
+
+  put(g, new THREE.PointLight(0x5fa8ff, 30, 26, 1.4), 0,3,0);
+}
+
+/* ---- ГРУЗОВОЙ ТРЮМ ---- */
+function buildCargo(){
+  const g = roomGroup(0);
+  const palette=[0x4a3b28,0x53452e,0x3f3424,0x5a4a32];
+  const stack=[];
+  for(let i=0;i<14;i++){
+    const s = 1.2 + (i%3)*0.35;
+    const b = box(s,s,s,palette[i%4],{rough:0.9});
+    const px = -8 + (i%4)*3.2, pz = -8 + Math.floor(i/4)*3.4;
+    put(g,b, px, s/2 + (i%5===0?1.1:0), pz, (i*0.21));
+  }
+  // открытый ящик с находкой
+  const open = box(1.6,1.1,1.6,0x3a2f20,{rough:0.95});
+  put(g,open, 6,0.55,-8);
+  const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.45,0), mat(0xffd76a,{emissive:0xbb7f10,ei:2.2}));
+  put(g, shard, 6,1.5,-8); art(shard,'float',0.4);
+  put(g, new THREE.PointLight(0xffc040, 12, 8, 1.6), 6,1.8,-8);
+
+  // бочки
+  for(let i=0;i<6;i++){
+    put(g, cyl(0.55,0.6,1.5,0x5a4a30,{metal:0.4,rough:0.7}), -4+i*1.6, 0.75, 8);
+  }
+  // кран с крюком
+  put(g, cyl(0.12,0.12,3.2,0x3a3a40,{metal:0.8,rough:0.4}), 0,2.6,0);
+  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.35,0.09,8,16), mat(0x8a8a92,{metal:0.9,rough:0.35}));
+  put(g, hook, 0,0.95,0); art(hook,'sway',0.9);
+
+  // спасательная капсула
+  const pod = new THREE.Group();
+  pod.add(new THREE.Mesh(new THREE.CapsuleGeometry(1.1,2.2,8,16), mat(0xd8d8e0,{metal:0.5,rough:0.45})));
+  const win = new THREE.Mesh(new THREE.SphereGeometry(0.45,12,10), mat(0x2a4a6a,{emissive:0x2266aa,ei:1.2,metal:0.4}));
+  win.position.set(0,0.4,0.9); pod.add(win);
+  pod.position.set(7.5,1.4,7); g.add(pod); art(pod,'float',2.1);
+
+  put(g, new THREE.PointLight(0xff9a40, 26, 34, 1.3), 0,3,0);
+}
+
+/* ---- ИНЖЕНЕРНЫЙ ---- */
+function buildEngine(){
+  const g = roomGroup(1);
+  // две машины
+  for(const dz of [-5,5]){
+    put(g, box(4,2.6,5,0x2e3038,{metal:0.65,rough:0.5}), -6,1.3,dz);
+    put(g, cyl(1.0,1.2,3.4,0x3a3f4a,{metal:0.7,rough:0.35}), -6,3.0,dz);
+    for(let k=0;k<3;k++){
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(1.35,0.1,6,20), mat(0x6a7280,{metal:0.9,rough:0.3}));
+      ring.rotation.x = Math.PI/2; put(g, ring, -6, 1.9+k*0.9, dz);
+    }
+    // вентиль
+    const v = new THREE.Mesh(new THREE.TorusGeometry(0.55,0.1,6,16), mat(0xaa4422,{metal:0.6}));
+    put(g, v, -2.6, 1.6, dz); art(v,'spin',dz);
+  }
+  // пульт
+  put(g, box(3.2,1.0,1.0,0x1e2228,{metal:0.6}), 5,0.5,-6);
+  const scr = box(2.8,0.05,0.7,0x0a1a10,{emissive:0x44ff88,ei:1.5});
+  scr.rotation.x=-0.4; put(g,scr,5,1.05,-6); art(scr,'flicker',0);
+
+  // трубопровод вдоль стены
+  for(let i=0;i<10;i++){
+    put(g, cyl(0.16,0.16,2.2,0x4a5058,{metal:0.85,rough:0.35}), -9.6, 0.3+i*0.42, -12);
+    put(g, cyl(0.16,0.16,2.2,0x4a5058,{metal:0.85,rough:0.35}), -9.6, 0.3+i*0.42,  12);
+  }
+  // ящик с инструментом
+  put(g, box(1.8,0.8,1.0,0x8a3a1a,{metal:0.4,rough:0.6}), 7,0.4,6);
+  put(g, new THREE.PointLight(0xffb840, 28, 32, 1.3), 0,3,0);
+}
+
+/* ---- РЕАКТОР ---- */
+function buildReactor(){
+  const g = roomGroup(2);
+  // основание
+  put(g, cyl(4.2,4.8,0.5,0x1e2e34,{metal:0.6,rough:0.5}), 0,0.25,0);
+  put(g, cyl(2.4,3.2,0.9,0x2a4048,{metal:0.7,rough:0.4}), 0,0.95,0);
+
+  // ядро
+  const core = new THREE.Mesh(new THREE.SphereGeometry(1.5,24,16),
+      mat(0x88ffcc,{emissive:0x22ffaa,ei:2.8,transparent:true,opacity:0.9}));
+  put(g, core, 0,3.0,0); art(core,'pulse',0);
+  put(g, new THREE.PointLight(0x33ffaa, 90, 40, 1.4), 0,3.0,0);
+
+  // кольца
+  const r1 = new THREE.Mesh(new THREE.TorusGeometry(2.6,0.12,8,40), mat(0x66ffcc,{emissive:0x22aa77,ei:2}));
+  r1.rotation.x = Math.PI/2; put(g,r1,0,3.0,0); art(r1,'ringH',0);
+  const r2 = new THREE.Mesh(new THREE.TorusGeometry(3.1,0.10,8,44), mat(0x66ffcc,{emissive:0x22aa77,ei:1.6}));
+  put(g,r2,0,3.0,0); art(r2,'ringV',1.2);
+
+  // удерживающие стойки
+  for(let k=0;k<4;k++){
+    const a = k*Math.PI/2 + Math.PI/4;
+    const x = Math.cos(a)*3.4, z = Math.sin(a)*3.4;
+    put(g, box(0.5,4.6,0.5,0x334a52,{metal:0.7,rough:0.4}), x,2.3,z, a);
+    const cap = box(0.8,0.3,0.8,0x44ffaa,{emissive:0x22cc88,ei:1.4});
+    put(g, cap, x,4.5,z, a);
+  }
+  // трубы от основания
+  for(let k=0;k<6;k++){
+    const a = k*Math.PI/3;
+    put(g, cyl(0.22,0.22,3.0,0x3a4a52,{metal:0.8,rough:0.35}),
+        Math.cos(a)*5.2, 0.35, Math.sin(a)*5.2);
+  }
+  // терминал
+  put(g, box(2.6,1.1,0.9,0x1a2a30,{metal:0.6}), 7.5,0.55,8, -0.5);
+}
+
+/* ---- ЖИЛОЙ ОТСЕК ---- */
+function buildCrew(){
+  const g = roomGroup(3);
+  for(const dz of [-6.5, 1.5]){
+    // двухъярусная койка
+    put(g, box(0.2,2.4,0.2,0x55504a,{metal:0.6}), -8,1.2,dz-1.6);
+    put(g, box(0.2,2.4,0.2,0x55504a,{metal:0.6}), -4.6,1.2,dz-1.6);
+    put(g, box(0.2,2.4,0.2,0x55504a,{metal:0.6}), -8,1.2,dz+1.6);
+    put(g, box(0.2,2.4,0.2,0x55504a,{metal:0.6}), -4.6,1.2,dz+1.6);
+    for(const y of [0.75,2.05]){
+      put(g, box(3.4,0.18,3.2,0x3a3630,{rough:0.9}), -6.3,y,dz);
+      put(g, box(3.0,0.14,2.6,0x6a5f52,{rough:1}), -6.3,y+0.16,dz);
+      put(g, box(1.0,0.22,1.6,0x8a8278,{rough:1}), -7.5,y+0.28,dz);
+    }
+  }
+  // шкафчики
+  for(let i=0;i<4;i++){
+    put(g, box(0.9,2.2,0.7,0x39423a,{metal:0.6,rough:0.5}), 8.5,1.1,-6+i*1.05);
+    put(g, box(0.06,0.25,0.06,0xcccccc,{emissive:0x8899aa,ei:0.6}), 8.0,1.1,-6+i*1.05);
+  }
+  // стол с лампой и «фотографией»
+  put(g, cyl(0.9,0.9,0.08,0x4a4038,{rough:0.8}), 2,0.95,7);
+  put(g, cyl(0.08,0.08,0.9,0x3a3a3a,{metal:0.7}), 2,0.45,7);
+  put(g, cyl(0.5,0.3,0.35,0x2a2a2a,{metal:0.5}), 2,1.15,7);
+  put(g, box(0.5,0.4,0.06,0x1a1a1a,{metal:0.4}), 2.4,1.15,7.4, 0.4);
+  put(g, new THREE.PointLight(0xffd6a0, 14, 10, 1.5), 2,1.5,7);
+  // чей-то рюкзак
+  put(g, box(0.7,0.9,0.5,0x5a4a3a,{rough:0.9}), -2,0.45,-8, 0.7);
+  put(g, new THREE.PointLight(0xffdcaa, 26, 34, 1.3), 0,3,0);
+}
+
+/* ---- КАЮТ-КОМПАНИЯ ---- */
+function buildMess(){
+  const g = roomGroup(4);
+  // длинный стол
+  put(g, box(10,0.18,2.6,0x4a4038,{rough:0.75}), 0,0.95,0);
+  for(const x of [-4.4,-1.5,1.5,4.4]) for(const z of [-1.0,1.0])
+    put(g, cyl(0.09,0.09,0.9,0x3a3a3a,{metal:0.7}), x,0.45,z);
+  // стулья
+  for(const x of [-3.6,-1.2,1.2,3.6]) for(const z of [-2.2,2.2]){
+    put(g, box(0.7,0.12,0.7,0x3a3630,{rough:0.8}), x,0.55,z);
+    put(g, box(0.7,0.8,0.12,0x3a3630,{rough:0.8}), x,0.95,z + (z>0?0.3:-0.3));
+    put(g, cyl(0.07,0.07,0.55,0x333333,{metal:0.7}), x,0.27,z);
+  }
+  // лавки у стены
+  put(g, box(0.9,0.5,9,0x3a3630,{rough:0.85}), 8.4,0.25,0);
+  // кухонный блок
+  put(g, box(7,1.0,1.6,0x36322c,{metal:0.4,rough:0.6}), 0,0.5,11);
+  put(g, box(2.2,0.06,1.2,0x1a1a1a,{emissive:0xff7a1a,ei:0.9}), -1.6,1.04,11);
+  put(g, box(1.4,0.6,1.0,0x2a2a2a,{metal:0.6}), 1.8,1.3,11);
+  put(g, box(6.6,0.06,1.4,0x1a1c22,{metal:0.5}), 0,2.4,11);
+  // раздатчик еды
+  const wnd = box(2.4,1.6,0.3,0x0a1a1a,{emissive:0x44ffaa,ei:0.8});
+  put(g, wnd, -8.6,1.5,11, Math.PI/2);
+  put(g, new THREE.PointLight(0xffe8c0, 26, 34, 1.3), 0,3,0);
+}
+
+/* ---- МЕДБЛОК ---- */
+function buildMedbay(){
+  const g = roomGroup(5);
+  for(let i=0;i<3;i++){
+    const z = -7 + i*7;
+    put(g, box(2.0,0.35,5.0,0x2a3038,{metal:0.5,rough:0.5}), -5,0.75,z);
+    for(const dz of [-2.0,2.0]) for(const dx of [-0.9,0.9])
+      put(g, cyl(0.08,0.08,0.7,0x505860,{metal:0.8}), -5+dx,0.4,z+dz);
+    put(g, box(1.7,0.16,4.4,0x8a95a0,{rough:0.9}), -5,0.98,z);
+    put(g, box(0.9,0.2,0.7,0xa0aab4,{rough:0.9}), -5,1.12,z-1.7);
+    // монитор
+    put(g, box(0.5,0.6,0.1,0x141a20,{metal:0.5}), -6.6,1.6,z-1.4, Math.PI/2);
+    const s = box(0.04,0.3,0.4,0x000000,{emissive:0x44ffcc,ei:1.4});
+    put(g, s, -6.55,1.6,z-1.4, Math.PI/2); art(s,'flicker',i);
+  }
+  // хирургическая лампа
+  put(g, cyl(0.1,0.1,1.2,0x7a828a,{metal:0.8}), 3,2.4,0);
+  const slit = new THREE.Mesh(new THREE.CylinderGeometry(0.85,0.6,0.25,20), mat(0xeef6ff,{emissive:0xccf0ff,ei:1.6}));
+  put(g, slit, 3,3.0,0);
+  put(g, new THREE.PointLight(0xd8f4ff, 40, 20, 1.4), 3,2.9,0);
+
+  // шкаф с медикаментами
+  put(g, box(1.2,2.2,4.2,0x2a343a,{metal:0.4,rough:0.5}), 8,1.1,-2);
+  for(let i=0;i<3;i++) put(g, box(0.06,0.05,3.8,0x8ad0ff,{emissive:0x3388cc,ei:1.0}), 7.4,0.7+i*0.6,-2);
+
+  // мед-дроид
+  const dr = new THREE.Mesh(new THREE.SphereGeometry(0.35,14,10), mat(0xdfe8f0,{metal:0.6,rough:0.4}));
+  put(g, dr, 2,1.8,7); art(dr,'float',0.7);
+  const dring = new THREE.Mesh(new THREE.TorusGeometry(0.55,0.05,6,24), mat(0x66d0ff,{emissive:0x2288cc,ei:1.6}));
+  put(g, dring, 2,1.8,7); art(dring,'ringH',0);
+
+  put(g, new THREE.PointLight(0xaaffff, 26, 34, 1.3), 0,3,0);
+}
+
+buildBridge(); buildCargo(); buildEngine(); buildReactor();
+buildCrew();  buildMess();  buildMedbay();
+
+/* ============================ 6. ПЫЛЬ ============================ */
+(function dust(){
+  const N = 2600, pos = new Float32Array(N*3);
+  for(let i=0;i<N;i++){
+    pos[i*3]   = (Math.random()-0.5)*110;
+    pos[i*3+1] = Math.random()*WALL_H;
+    pos[i*3+2] = (Math.random()-0.5)*110;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({
+    color:0xaaccff, size:0.055, transparent:true, opacity:0.35, depthWrite:false
+  })));
+})();
+
+/* ============================ 7. ИГРОК ============================ */
+const player = { x: 29.5, z: 0 };   // у входа на мостик, лицом внутрь
+let yaw = -Math.PI/2, pitch = 0;
+const keys = Object.create(null);
+
+function isFloorAt(x,z){
+  const gx = Math.floor(x/CELL + GRID_W/2);
+  const gz = Math.floor(z/CELL + GRID_H/2);
+  if(gx<0||gx>=GRID_W||gz<0||gz>=GRID_H) return false;
+  return cellType[gz*GRID_W+gx] !== 0;
+}
+function canStand(x,z){
+  const r = PLAYER_R;
+  return isFloorAt(x-r,z-r) && isFloorAt(x+r,z-r) && isFloorAt(x-r,z+r) && isFloorAt(x+r,z+r);
+}
+
+const startEl = document.getElementById('start');
+startEl.classList.add('hidden');
+
+function lock(){ renderer.domElement.requestPointerLock(); }
+document.addEventListener('click', () => {
+  if(document.pointerLockElement !== renderer.domElement) lock();
+});
+document.addEventListener('pointerlockchange', () => {
+  const on = document.pointerLockElement === renderer.domElement;
+  startEl.classList.toggle('hidden', on);
+});
+document.addEventListener('mousemove', e => {
+  if(document.pointerLockElement !== renderer.domElement) return;
+  yaw   -= e.movementX * 0.0022;
+  pitch -= e.movementY * 0.0022;
+  pitch = Math.max(-1.45, Math.min(1.45, pitch));
+});
+addEventListener('keydown', e => { keys[e.code] = true; });
+addEventListener('keyup',   e => { keys[e.code] = false; });
+
+function updatePlayer(dt){
+  const spd = (keys.ShiftLeft || keys.ShiftRight) ? 9 : 4.6;
+  const s = Math.sin(yaw), c = Math.cos(yaw);
+  let mx = 0, mz = 0;
+  if(keys.KeyW){ mx -= s; mz -= c; }
+  if(keys.KeyS){ mx += s; mz += c; }
+  if(keys.KeyA){ mx -= c; mz += s; }
+  if(keys.KeyD){ mx += c; mz -= s; }
+  const len = Math.hypot(mx,mz);
+  if(len > 0){
+    mx /= len; mz /= len;
+    const nx = player.x + mx*spd*dt;
+    const nz = player.z + mz*spd*dt;
+    if(canStand(nx, player.z)) player.x = nx;
+    if(canStand(player.x, nz)) player.z = nz;
+  }
+  camera.position.set(player.x, 1.7, player.z);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+}
+
+/* ============================ 8. МИНИКАРТА ============================ */
+const MM = 220, mmCanvas = document.getElementById('minimap');
+const mmCtx = mmCanvas.getContext('2d');
+const mmBg = document.createElement('canvas');
+mmBg.width = mmBg.height = MM;
+(function drawBg(){
+  const c = mmBg.getContext('2d');
+  c.fillStyle = '#05080e'; c.fillRect(0,0,MM,MM);
+  const s = MM/GRID_W;
+  for(let y=0;y<GRID_H;y++) for(let x=0;x<GRID_W;x++){
+    const i = y*GRID_W+x;
+    if(!cellType[i]) continue;
+    const hex = roomAt[i]>=0 ? ROOMS[roomAt[i]].floor : 0x22262e;
+    c.fillStyle = '#' + hex.toString(16).padStart(6,'0');
+    c.fillRect(x*s, y*s, Math.ceil(s), Math.ceil(s));
+  }
+  c.strokeStyle = 'rgba(43,58,74,.95)'; c.lineWidth = 2;
+  c.strokeRect(1,1,MM-2,MM-2);
+})();
+
+function drawMinimap(){
+  mmCtx.drawImage(mmBg,0,0);
+  const s = MM/GRID_W;
+  const px = (player.x/CELL + GRID_W/2) * s;
+  const pz = (player.z/CELL + GRID_H/2) * s;
+
+  // конус обзора
+  mmCtx.fillStyle = 'rgba(143,211,255,.22)';
+  mmCtx.beginPath();
+  mmCtx.moveTo(px,pz);
+  const fa = Math.atan2(-Math.cos(yaw), -Math.sin(yaw));
+  mmCtx.arc(px,pz,26, fa-0.5, fa+0.5);
+  mmCtx.closePath(); mmCtx.fill();
+
+  mmCtx.fillStyle = '#ffe066';
+  mmCtx.beginPath(); mmCtx.arc(px,pz,3.2,0,Math.PI*2); mmCtx.fill();
+  mmCtx.strokeStyle = 'rgba(255,224,102,.8)'; mmCtx.lineWidth = 1.5;
+  mmCtx.beginPath();
+  mmCtx.moveTo(px,pz);
+  mmCtx.lineTo(px - Math.sin(yaw)*13, pz - Math.cos(yaw)*13);
+  mmCtx.stroke();
+}
+
+document.getElementById('legend').innerHTML = ROOMS.map(r =>
+  `<div><i style="background:#${r.floor.toString(16).padStart(6,'0')};box-shadow:0 0 6px #${r.light.toString(16).padStart(6,'0')}"></i>${r.name}</div>`
+).join('');
+
+/* ============================ 9. HUD + ЦИКЛ ============================ */
+const roomNameEl = document.getElementById('roomName');
+const posEl = document.getElementById('pos');
+let hudTimer = 0;
+
+function roomNameAt(){
+  const gx = Math.floor(player.x/CELL + GRID_W/2);
+  const gz = Math.floor(player.z/CELL + GRID_H/2);
+  if(gx<0||gx>=GRID_W||gz<0||gz>=GRID_H) return '—';
+  const i = gz*GRID_W+gx;
+  if(roomAt[i] >= 0) return ROOMS[roomAt[i]].name;
+  if(cellType[i] === 2) return 'ПЕРЕХОД';
+  return '—';
+}
+
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t  = clock.getElapsedTime();
+
+  updatePlayer(dt);
+
+  for(const a of animated){
+    const o = a.obj, b = a.base;
+    switch(a.kind){
+      case 'spin':  o.rotation.y = t*0.9 + a.ph; break;
+      case 'float': o.position.y = b.y + Math.sin(t*1.3 + a.ph)*0.35; o.rotation.y = t*0.7 + a.ph; break;
+      case 'sway':  o.rotation.z = Math.sin(t*0.9 + a.ph)*0.25; o.position.y = b.y + Math.sin(t*1.1 + a.ph)*0.12; break;
+      case 'pulse': {
+        const k = 1 + Math.sin(t*2.2)*0.08;
+        o.scale.setScalar(k);
+        o.material.emissiveIntensity = 2.2 + Math.sin(t*2.2)*0.8;
+        break;
+      }
+      case 'ringH': o.rotation.z = t*0.8 + a.ph; break;   // тор в плоскости XZ → крутим вокруг Y-эквивалента локально
+      case 'ringV': o.rotation.x = t*0.6 + a.ph; o.rotation.z = t*0.4; break;
+      case 'flicker': {
+        const f = 0.6 + 0.4*Math.abs(Math.sin(t*7 + a.ph*3)) * (Math.random() > 0.06 ? 1 : 0.2);
+        o.material.emissiveIntensity = 1.4*f + 0.3;
+        break;
+      }
+      case 'bar': {
+        o.scale.y = 0.3 + 0.7*Math.abs(Math.sin(t*1.6 + a.ph));
+        o.position.y = b.y - (1 - o.scale.y)*0.5;
+        break;
+      }
+    }
+  }
+
+  hudTimer += dt;
+  if(hudTimer > 0.2){
+    hudTimer = 0;
+    roomNameEl.textContent = roomNameAt();
+    posEl.textContent = `x ${player.x.toFixed(1)} · z ${player.z.toFixed(1)}`;
+    drawMinimap();
+  }
+
+  renderer.render(scene, camera);
+}
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* старт */
+const loadEl = document.getElementById('loading');
+loadEl.style.opacity = '0';
+setTimeout(() => { loadEl.remove(); startEl.classList.remove('hidden'); }, 400);
+animate();
+
+/* отладка: window.__ship.tp('МЕДБЛОК') */
+window.__ship = {
+  scene, camera, THREE,
+  rooms: ROOMS.map((r,i)=>({name:r.name, ...ROOM_C[i]})),
+  at(i){ player.x = ROOM_C[i].x; player.z = ROOM_C[i].z; },
+  tp(name){ const i = ROOMS.findIndex(r=>r.name===name); if(i>=0) this.at(i); },
+  look(v){ yaw = v; },
+  set(x,z){ player.x = x; player.z = z; },
+  pos(){ return {x:player.x, z:player.z}; }
+};
+</script>
+</body>
+</html>

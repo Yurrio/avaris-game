@@ -1,3 +1,9 @@
+import {animateDeparture,departureDuration} from './lander.js';
+import {LANDING_SITE} from './terrain.js';
+import {showDigPanel} from './dig-panel.js';
+import {templeReport} from './excavation.js';
+import {ASCENT} from './terrain.js';
+import {newResonance,stepResonance} from './resonance.js';
 /* ============================================================================
    АВАРИС · «По ту сторону бури» — игровой слой.
    Состояние истории живёт в js/story.js (чистая логика, проверяется в node).
@@ -246,7 +252,9 @@ let debris = null;           // пыль финала: мусор в возду�
 let qFrames = 0, qTime = 0;
 
 function applyQuality() {
-  renderer.setPixelRatio(lowQuality ? 1 : Math.min(devicePixelRatio, QUALITY_BASE_RATIO));
+  const ratio=lowQuality ? Math.min(devicePixelRatio,.85) : Math.min(devicePixelRatio, QUALITY_BASE_RATIO);
+  renderer.setPixelRatio(ratio);
+  composer.setPixelRatio(ratio);
   bloom.enabled = !lowQuality;
   const size = lowQuality ? 1024 : 1536;
   if (sun.shadow.mapSize.x !== size) {
@@ -335,7 +343,7 @@ motes.setQuality(lowQuality);
 // мусор, который несёт буря в самом финале: появляется до полной белизны
 debris = new StormDebris(scene);
 debris.setQuality(lowQuality);
-rover.placeAt(70, -118, [TEMPLE.x, TEMPLE.z]);
+rover.placeAt(-142, 99, [TEMPLE.x, TEMPLE.z]);
 
 /* ================================================================ ЗВУК */
 const audio = {
@@ -779,15 +787,13 @@ const STORY_TEXT = {
     '2132 год. Аварис — планета, чей сигнал повторяет всплески, которые ловили ещё ' +
     'примитивные антенны Земли. На поверхность вышли трое: археолог Мира, физик Лев ' +
     'и бортинженер Нина. «Одиссей» ждёт на орбите. И где-то здесь идёт Великая буря.',
-  fog: 'Стоп! Дальше буря слишком плотная — она разъедает обшивку. Пять метров, не больше.',
-  repair: 'Обшивка не выдержала. Я заварил пробоины — но больше так не подставляйся.',
-  digDone: 'Готово. Внешние слои расходятся, словно лепестки. Ни следа коррозии.',
-  artifact:
-    'Фазовый ключ. Его слои — не украшение: это регуляторы энергии. Он откликается на импульсы ' +
-    'к востоку от храма — к порогу резонанса.',
-  signalDone: 'Резонанс зафиксирован. Завеса расходится — по ту сторону стоят руины.',
-  ahola: 'Ахола. Древний буфер: разряжаешь его — и буря отступает. Каждый работает лишь однажды.',
-  aholaLocked: 'Ахола молчит: без следующего этапа расследования мы не знаем, как её разрядить.',
+  fog: "Стоп! Дальше буря слишком плотная — она царапает обшивку. Пять метров, не больше.",
+  repair: "Обшивка не выдержала. Я заварил пробоины — но больше так не подставляйся.",
+  digDone: "Готово. Слои расходятся, словно лепестки Сиренума. Ни следа коррозии.",
+  artifact: "Фазовый ключ. Его слои — не украшение: это регуляторы энергии. Он откликается на импульсы к востоку от храма — к порогу резонанса.",
+  signalDone: "Резонанс достигнут. Завеса расходится — по ту сторону стоят руины.",
+  ahola: "Ахола. Древний буфер: активируешь его — и буря отступает. Каждый работает лишь единожды.",
+  aholaLocked: "Ахола молчит: без следующего этапа расследования мы не знаем, как её активировать.",
   tabletLocked: (n) => `Переводчик не знает слов: нужно ещё ${n}.`,
   core: 'Мы у самых развалин. Шпиль уходит в небо и держит завесу.',
 };
@@ -825,7 +831,10 @@ function readSave() {
 
 function applyState(s) {
   state = s;
-  rover.placeAt(s.position.x, s.position.z);
+  const dx=s.position.x-LANDING_SITE.x, dz=s.position.z-LANDING_SITE.z;
+  // Older saves can place the rover on ground now occupied by the lander.
+  if(dx>-6.7 && dx<5.2 && Math.abs(dz)<4.6) rover.placeAt(LANDING_SITE.exitX,LANDING_SITE.exitZ);
+  else rover.placeAt(s.position.x, s.position.z);
   rover.hp = s.hp;
   setDig(s.dig);
   world.repaintDig();
@@ -871,7 +880,20 @@ const keys = Object.create(null);
 const BLOCK = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 addEventListener('keydown', (e) => {
+  if(mode==='departure'){
+    if(['Space','Escape','Enter'].includes(e.code)){
+      e.preventDefault();
+      if(!e.repeat) finishDeparture();
+    }
+    return;
+  }
   // печатаем в поле журнала — клавиши игры не слушаем вовсе
+  if (mode==='signal' && (e.code==='Space' || e.code==='Escape')) {
+    e.preventDefault();
+    if(e.code==='Space') keys.Space=true;
+    else if(!e.repeat) openPause();
+    return;
+  }
   const tgt = e.target;
   if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA')) {
     if (e.code === 'Escape') tgt.blur();
@@ -897,7 +919,8 @@ addEventListener('keydown', (e) => {
     if (e.code === 'KeyE' && !e.repeat) tryInteract();
     if (e.code === 'KeyF' && !e.repeat) {
       // у схрона F снимает грунт с ларца, иначе — копает землю как обычно
-      if (nearHint && nearHint.kind === 'scroll') digScroll(nearHint.obj);
+      const near=nearestInteract();
+      if (near && near.kind === 'scroll') digScroll(near.obj);
       else handDig();
     }
     if (e.code === 'KeyR' && !e.repeat) respawn();
@@ -937,10 +960,10 @@ addEventListener('keyup', (e) => {
 });
 addEventListener('blur', () => {
   for (const k in keys) keys[k] = false;
-  if (mode === 'explore') openPause(true);
+  if (mode === 'explore' || mode === 'signal') openPause(true);
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && mode === 'explore') openPause(true);
+  if (document.hidden && (mode === 'explore' || mode === 'signal')) openPause(true);
 });
 
 function readInput() {
@@ -988,7 +1011,7 @@ function focusShot(obj, shot) {
  * стороны мы ни подъехали. Центр — центр габаритов, направление — «лицо»
  * механизма (локальная +Z), дистанция — из радиуса описанной сферы и FOV.
  */
-function focusFit(obj, shot = {}) {
+function focusFit(obj, shot = {}, inscription = null) {
   if (!obj) return;
   obj.updateMatrixWorld(true);
   // габариты считаем только по мешам: спрайты свечения и источники света
@@ -1011,6 +1034,7 @@ function focusFit(obj, shot = {}) {
   const front = new THREE.Vector3(0, 0, 1).applyQuaternion(q).normalize();
   front.applyAxisAngle(new THREE.Vector3(0, 1, 0), ((shot.yaw ?? 14) * Math.PI) / 180);
   const look = sphere.center.clone();
+  if(inscription) look.lerp(inscription.getWorldPosition(new THREE.Vector3()),.16);
   const pos = look.clone().addScaledVector(front, dist);
   pos.y += sphere.radius * 0.12;
   cam.focus = {
@@ -1386,7 +1410,7 @@ function handDig() {
       if (mode === 'explore') {
         say([
           { who: 'МИРА', text: `В грунте — ${t.name.toLowerCase()}. ${t.text}` },
-          { who: 'ЛЕВ', text: res.again ? 'Такое у нас уже есть. Второй экземпляр в отчёт не пойдёт.' : 'Безделушка. Для отчёта мелко, но место запомним.' },
+          ...(t.id==='tag' && !res.again ? [{"who": "МИРА", "text": "Это не просто список имён — на ней целые родословные. А в самом низу другой рукой, позже, выбито: «Имена оставлены тем, кто проснётся и вернёт их нам». Они кого-то ждали, Лев. Не гостей — тех, кто разбудит."}, {"who": "ЛЕВ", "text": "Записываю как наблюдение: приписка сделана позже основного текста. Гипотеза: имена хранили не для памяти, а для возвращения. Зачем и кому — пока не знаю."}] : [{ who: 'ЛЕВ', text: res.again ? 'Такое у нас уже есть. Второй экземпляр в отчёт не пойдёт.' : 'Безделушка. Для отчёта мелко, но место запомним.' }]),
         ], 'explore');
       }
       audio.unearth();
@@ -1406,9 +1430,11 @@ function updateHandDigs(dt) {
   for (let i = handGrow.length - 1; i >= 0; i--) {
     const a = handGrow[i];
     a.t = Math.min(1, a.t + dt / 1.35);
+    if (a.t < 1 && Math.floor(a.t*10) === (a.step || 0)) continue;
+    a.step=Math.floor(a.t*10);
     setHandDigGrow(a.e, a.t * a.t * (3 - 2 * a.t));
     world.repaintArea(a.e.x, a.e.z, a.e.r + 4, a.t >= 1);
-    world.regroundArea(a.e.x, a.e.z, a.e.r * 1.6);
+    if (a.t>=1) world.regroundArea(a.e.x, a.e.z, a.e.r * 1.6);
     if (Math.random() < dt * 30) {
       const ang = Math.random() * Math.PI * 2;
       const r = a.e.r * (0.5 + Math.random() * 0.5);
@@ -1449,12 +1475,19 @@ function nearestInteract() {
     if (!b || state.used.includes(ah.id)) continue;
     consider('ahola', { ahola: ah, beacon: b }, b.pos, 18);
   }
-  if (state.synced) consider('core', world.vault, world.vault.pos, 30);
+  if (state.synced) {
+    const vault = world.vault;
+    if (!state.visitedVault) consider('vault',vault,vault.scanPos || vault.pos,vault.model?5:20);
+    else consider('core',P.core,P.core,11);
+  }
   return best;
 }
 
 function updatePrompt() {
   nearHint = nearestInteract();
+  if (state.decoded && onMound()) {
+    ui.prompt.innerHTML=state.artifact?'<b>F</b> — восстановить ход раскопок':'<b>F</b> — начать раскопки храма';ui.prompt.classList.add('on');return;
+  }
   if (!nearHint) { ui.prompt.classList.remove('on'); return; }
 
   let text = '';
@@ -1472,12 +1505,13 @@ function updatePrompt() {
       break;
     case 'ahola': {
       const a = nearHint.obj.ahola;
-      const add = a.tier === 1 ? 100 : a.tier === 2 ? 85 : 70;
+      const add = 60;
       text = STORY.aholaOpen(state, a)
         ? `<b>E</b> — разрядить ахолу <span>(+${add} с бури)</span>`
         : `Ахола молчит · ступень ${a.tier}`;
       break;
     }
+    case 'vault': text='<b>E</b> — осмотреть криокапсулы'; break;
     case 'core': text = '<b>E</b> — войти в Сердце бури'; break;
     default: break;
   }
@@ -1487,7 +1521,7 @@ function updatePrompt() {
 
 function tryInteract() {
   if (mode !== 'explore') return;
-  const t = nearHint || nearestInteract();
+  const t = nearestInteract();
   if (!t) return;
 
   if (t.kind === 'artifact') {
@@ -1504,7 +1538,7 @@ function tryInteract() {
     return;
   }
   if (t.kind === 'anomaly') {
-    if (!state.artifact) { toast('Аномалия не реагирует: нужен фазовый ключ'); audio.tone(180, 0.2, 'sine', 0.06, 120); return; }
+    if (!state.artifact) { toast("Не подъезжай! Без ключа эта штука режет обшивку."); audio.tone(180, 0.2, 'sine', 0.06, 120); return; }
     openSignal();
     return;
   }
@@ -1516,13 +1550,18 @@ function tryInteract() {
       t.obj.beacon.litT = 0;
       audio.ahola();
       audio.spark();
-      const add = a.tier === 1 ? 100 : a.tier === 2 ? 85 : 70;
+      const add = 60;
       say([{ who: 'ЛЕВ', text: STORY_TEXT.ahola }], 'explore');
       toast(`Ахола разряжена · +${add} с`);
       paintProgress();
       saveGame();
     }
     return;
+  }
+  if (t.kind==='vault') {
+    state.visitedVault=true;
+    if (!state.journal.includes('vault')) state.journal.push('vault');
+    saveGame(); say([{"who": "МИРА", "text": "Огни горят. Хранилище питается от той самой бури — поэтому и держится до сих пор."}, {"who": "ЛЕВ", "text": "Криокапсулы. Сотни. И они разные — смотри: эти высокие, с гребнем, а эти ниже и шире. Совсем другие пропорции."}, {"who": "МИРА", "text": "Это не один народ — несколько видов. Они собирали тех, кого могли спасти. И все капсулы повёрнуты к городу, как будто ждут, что кто-то откроет двери."}, {"who": "ЛЕВ", "text": "Сами капсулы мертвы, но записи внутри целы. Если передать их ретранслятору до отключения, потом по ним смогут восстановить всё, что здесь спит. Но хранилище исчезнет."}, {"who": "МИРА", "text": "Значит, они ждали не нас. Они ждали того, кто решится их разбудить."}],'explore'); return;
   }
   if (t.kind === 'core') finalDialogue();
 }
@@ -1531,19 +1570,7 @@ function tryInteract() {
 /** Копать землю у схрона: переиспользуем настоящую механику шурфа */
 function digScroll(cache) {
   if (!cache || state.scrolls.includes(cache.id) || cache.target >= 1) return;
-  if (rover.energy < HAND_DIG_COST) {
-    toast(`Мало энергии: на шурф нужно ${HAND_DIG_COST}%`);
-    audio.tone(200, 0.18, 'sine', 0.05, 120);
-    return;
-  }
-  rover.vel.x = 0; rover.vel.z = 0; rover.speed = 0;
-  rover.energy = Math.max(0, rover.energy - HAND_DIG_COST);
-  // учитываем шурф так же, как обычное копание (лимит и журнал)
-  const res = STORY.digAnywhere(state, cache.pos.x, cache.pos.z);
-  if (!res.ok) return;
-  // настоящая яма в грунте — та же, что на шурфах
-  const e = addHandDig(cache.pos.x, cache.pos.z);
-  handGrow.push({ e, t: 0 });
+  rover.vel.x=rover.vel.z=rover.speed=0;
   rover.shake = Math.max(rover.shake, 0.4);
   audio.dig(true);
   for (let i = 0; i < 28; i++) {
@@ -1552,9 +1579,11 @@ function digScroll(cache) {
     const px = cache.pos.x + Math.cos(a) * r, pz = cache.pos.z + Math.sin(a) * r;
     rover.dust.emit(new THREE.Vector3(px, meshHeightAt(px, pz) + 0.5, pz), 2, 4.2, 'clod');
   }
+  // Копаем как в любом другом месте: земля проседает, яма растёт,
+  // схрон остаётся в грунте и просто открывается
+  const hole = addHandDig(cache.pos.x, cache.pos.z);
+  handGrow.push({ e: hole, t: 0 });
   cache.target = 1;
-  paintProgress();
-  saveGame();
 }
 
 /** Довести раскопки до конца и только потом показать пластину */
@@ -1672,12 +1701,15 @@ async function enterInspectCut(site, art) {
   await fadeCut(1, 170);       // затемнение
   inspect.site = site;
   inspect.holding = false;
-  focusFit(site.group, site.shot);   // механизм влезает целиком
+  focusFit(site.group, site.shot, site.medallion);   // механизм влезает целиком
   snapToFocus();
   rover.group.visible = false; // машина уезжает из кадра
   // убираем только те камни, что стоят между камерой и механизмом
   world.hideRocksBlocking(camera.position, site.pos || site.group.position, 2.6);
   mode = 'inspect';
+  const first = !Object.values(state.seen).some(entries=>entries.length);
+  STORY.seeState(state,art.id,site.on?art.on:art.off);
+  if(first) toast("Это знак аварисцев. Запишите его себе и предположите, что он значит — любыми словами.");
   audio.ui();
   paintInspectPrompt();
   saveGame();
@@ -1741,11 +1773,11 @@ function toggleInspect() {
     if (STORY.keysComplete(state) && !state.decoded) {
       say([
         { who: 'МИРА', text: art.text },
-        { who: 'ЛЕВ', text: 'Всё, язык собран. Загляни в инвентарь (I) — расшифруй знаки на пластинах, остальное за нас сделает ИИ.' },
+        { who: 'ЛЕВ', text: "Шесть знаков. Пластины промедления не терпят — поехали, попробуем прочитать три текста." },
       ], () => paintInspectPrompt());
       return;
     }
-    say([{ who: 'МИРА', text: art.text }], () => paintInspectPrompt());
+    say([{ who:'МИРА',text:art.text },{who:'ЛЕВ',text:"Записал. Осталось механизмов: N. Чем больше знаков, тем легче будет прочесть пластины.".replace('N',String(3-state.solved.length))}], () => paintInspectPrompt());
     return;
   }
   paintInspectPrompt();
@@ -2693,6 +2725,7 @@ function openJournal() {
   const trinket = (id) => STORY.TRINKETS.find((t) => t.id === id);
   $('journalList').innerHTML = state.journal
     .map((id) => {
+      if (id==='artifact' && templeReport(state.excavation)) return '<article><h4>'+STORY.LORE.artifact[0]+'</h4><p>'+STORY.LORE.artifact[1]+' '+templeReport(state.excavation)+'</p></article>';
       if (STORY.LORE[id]) return `<article><h4>${STORY.LORE[id][0]}</h4><p>${STORY.LORE[id][1]}</p></article>`;
       const tr = trinket(id);
       if (tr) return `<article class="trinket"><h4>◇ ${tr.name}</h4><p>${tr.text}</p></article>`;
@@ -2706,6 +2739,8 @@ function openJournal() {
 function openPause(auto = false) {
   if (!auto) audio.ui();
   if (mode === 'ending' || mode === 'menu' || mode === 'defeat') return;
+  resumeSignal=mode==='signal';
+  if(resumeSignal) { keys.Space=false; signalPointer=false; $('signal').classList.add('hidden'); }
   mode = 'pause';
   $('cursorPick').classList.add('hidden');
   $('pause').classList.remove('hidden');
@@ -2729,6 +2764,10 @@ function closeCursorPick() {
 
 function closeTop() {
   audio.ui();
+  if(mode==='pause' && resumeSignal) {
+    resumeSignal=false; mode='signal'; $('pause').classList.add('hidden'); $('signal').classList.remove('hidden'); return;
+  }
+  $('excavation').classList.add('hidden');
   const wasArtifact = mode === 'artifact';
   // журнал/миниигра только что закрылись: Esc в ближайшие мгновения
   // и поздняя потеря захвата указателя не должны открывать паузу
@@ -2783,13 +2822,7 @@ function closeTop() {
 
 /* ================================================================ ФИНАЛ */
 function finalDialogue() {
-  say([
-    { who: 'УСТРОЙСТВО', text: 'Доступ разрешён. Вы стоите в узле номер ноль. Два миллиона лет назад мы сами построили бурю — чтобы управлять небом. Сначала это работало.' },
-    { who: 'УСТРОЙСТВО', text: 'Потом буря стала верой. Совет объявил её священной и запретил отключение. Инженеры успели построить ахолы — последний способ выиграть время для детей.' },
-    { who: 'МИРА', text: 'То есть вы погибли не от бури. Вы погибли от собственного решения её не выключать.' },
-    { who: 'ЛЕВ', text: 'Мира. Если отключить шпиль, небеса откроются. И всё, что здесь держится, обрушится вместе с нами.' },
-    { who: 'МИРА', text: 'А если уйдём — буря останется, и никто больше не узнает правду. Решаем вместе.' },
-  ], 'ending');
+  say([{"who": "УСТРОЙСТВО", "text": "Доступ разрешён. Вы стоите в узле номер ноль. Две тысячи лет назад мы сами построили бурю — чтобы управлять небом. Сначала это работало."}, {"who": "УСТРОЙСТВО", "text": "Потом буря стала новой верой. Совет объявил её священной и запретил отключение. Инженеры успели построить ахолы — последний способ выиграть время для детей."}, {"who": "МИРА", "text": "То есть вы погибли не от бури. Вы погибли от собственного решения её не выключать."}, {"who": "ЛЕВ", "text": "Мира. Если отключить шпиль, небеса откроются. И всё, что здесь, обрушится, погребя нас."}, {"who": "УСТРОЙСТВО", "text": "Полное отключение уничтожит хранилище. Содержимое капсул можно передать вовне заранее. Для разгрузки нужны реакторы ровера и корабля — выжить в контуре невозможно."}, {"who": "МИРА", "text": "А если уйдём — буря останется, а спящие в хранилище так и не проснутся. Мы увезём их культуру, но сам Аварис останется в забвении. Решим вместе."}],'ending');
 }
 
 function chooseEnding(kind) {
@@ -2804,13 +2837,9 @@ function chooseEnding(kind) {
 function renderEnding(kind) {
   const free = kind === 'free';
   $('endingTitle').textContent = free ? 'ПО ТУ СТОРОНУ БУРИ' : 'ОБРАТНЫЙ КУРС';
-  $('endingText').textContent = free
-    ? 'Мира кладёт ладонь на шпиль. Небо над Аварисом трескается и расходится — впервые за два миллиона лет планета видит свои звёзды.\n\n' +
-      '«Одиссей» фиксирует с орбиты всплеск энергии и последний пакет данных: полную историю ахол, совета и той ошибки. ' +
-      'Трое остаются внизу. Их записи станут первым залом нового музея — и последним предупреждением.'
-    : 'Вы забираете артефакты и возвращаетесь на «Одиссей». Буря остаётся — спокойная, вечная, никому не нужная.\n\n' +
-      'В отчёте будет сказано: «Планета непригодна, сигнал имеет природное происхождение». Коллекция пополнится тремя предметами, ' +
-      'а вопрос, зачем цивилизация сама заперла себя под бурей, останется без ответа.';
+  $('endingText').textContent = free ? "Мира кладёт ладонь на шпиль. Небо над Аварисом трескается и расходится — впервые за две тысячи лет планета видит свои звёзды.\n\n«Одиссей» фиксирует с орбиты всплеск энергии и последний пакет данных: полную историю ахол, совета и той ошибки. Двое остаются внизу. Их записи станут первым залом нового музея — и последним предупреждением.\n\nПеред запуском «Одиссей» отправляет ретранслятору всё: журнал, переводы и генетические архивы из хранилища. Через годы по ним вернут к жизни аварисцев — и на их планету придут люди.\n\nВ отчёте это назовут «освоением новых территорий». Согласия хозяев, разумеется, никто не спросит." : "Вы забираете артефакты и возвращаетесь на «Одиссей». Буря остаётся: спокойная и вечная.\n\nВ отчёте будет сказано: «Планета непригодна, сигнал имеет природное происхождение». Коллекция пополнится тремя предметами, а вопрос, зачем цивилизация сама заперла себя под бурей, останется без ответа.\n\nКапсулы остаются спать в хранилище под бурей. В музеях Земли встанут витрины с керамикой, ключом и пластинами — а хозяев этих вещей никто не разбудит. Это назовут «сохранением культурного наследия».";
+  const report=templeReport(state.excavation);
+  if(report) $('endingText').textContent+='\n\n'+report;
   $('endingChoices').innerHTML = '';
   const b = document.createElement('button');
   b.className = 'choice';
@@ -3023,6 +3052,7 @@ let lastSteepHint = -99;
  * Фазовый ключ: кольца-регуляторы крутятся в разные стороны, весь ключ
  * покачивается. Когда его заберут — та же сборка висит над ровером.
  */
+let equippedKey=null;
 function updatePhaseCore(dt) {
   const spin = (core, speed) => {
     if (!core) return;
@@ -3044,6 +3074,22 @@ function updatePhaseCore(dt) {
     }
   };
   if (world.phaseCore && world.phaseCore.group.visible) spin(world.phaseCore, 1);
+  if(state.artifact && !state.synced && mode==='explore') {
+    const distance=Math.hypot(rover.pos.x-P.anomaly.x,rover.pos.z-P.anomaly.z);
+    if(distance<40) {
+      if(!equippedKey) {
+        equippedKey=buildPhaseCore();
+        equippedKey.group.scale.setScalar(.44);
+        equippedKey.group.position.set(0,roofHeight()+.3,0);
+        rover.group.add(equippedKey.group);
+      }
+      equippedKey.group.visible=true;spin(equippedKey,1+(40-distance)*.1);
+      if(!ui.keyResponse) {audio.tone(540,.35,'sine',.08,820);toast('Фазовый ключ отзывается на поле');}
+      ui.keyResponse=true;
+      const anomaly=world.anomalies[P.anomaly.index];
+      if(anomaly) anomaly.boost=Math.max(anomaly.boost,(1-distance/42)*1.8);
+    } else {ui.keyResponse=false;if(equippedKey) equippedKey.group.visible=false;}
+  } else if(equippedKey) equippedKey.group.visible=false;
 }
 
 /** Высота крыши ровера над точкой опоры — считается один раз по габаритам модели. */
@@ -3062,6 +3108,16 @@ function frame(now) {
   const dt = Math.min(0.06, raw);
   elapsed += dt;
   const t = elapsed;
+  if(mode==='departure'){
+    const advance=document.hidden?0:Math.min(raw,.20);
+    departureTime=Math.min(departureDuration,departureTime+advance);
+    animateDeparture(world.lander,rover,camera,departureTime,advance);
+    audio.setEngine(advance && departureTime>1.72 && departureTime<6.85?3:0,false);
+    updateDaylight();updateSunShadow();adaptQuality(raw);
+    world.update(t,dt,rover.pos);composer.render();
+    if(departureTime>=departureDuration) finishDeparture();
+    return;
+  }
 
   // страховка: вернулись в игру с любым наложением (журнал, пауза, карта) —
   // машина снова в кадре, подсказка осмотра убрана, иначе ровер «исчезает»
@@ -3075,8 +3131,20 @@ function frame(now) {
   if (mode !== 'explore' && document.pointerLockElement) releaseLook();
 
   tickToast(dt);
+  if (['excavation','signal','artifact','translate','journal','map','pause','ending','lesson','defeat'].includes(mode)) {
+    audio.setEngine(0,false); audio.setRoll(0); audio.setStorm(0,false);
+    if(mode==='artifact' && artBoot) artBoot.draw(dt,t);
+    if(mode==='signal') {
+      updateSignal(Math.min(raw,.25));
+      drawWaves();
+      // Show the changing curtain behind the instrument at a reduced rate.
+      if(!sig.lastScene || now-sig.lastScene>=200) {
+        world.update(t,.2,rover.pos); composer.render(); sig.lastScene=now;
+      }
+    }
+    return;
+  }
   updateHandDigs(dt);
-  updateMound(dt);
   updateWhiteout(dt);
   updateRadar(dt);
   updateScrollDig(dt);
@@ -3187,13 +3255,6 @@ function frame(now) {
 
     radarTimer += dt;
     if (radarTimer > 0.08) { radarTimer = 0; drawRadar(); }
-  } else if (mode === 'signal') {
-    updateSignal(dt);
-    drawWaves();
-    updateHud(dt);
-  } else if (mode === 'artifact') {
-    if (artBoot) artBoot.draw(dt, t);
-    updateHud(dt);
   } else if (mode !== 'menu') {
     updateHud(dt);
   }
@@ -3202,7 +3263,7 @@ function frame(now) {
   let best = null, bestD = 70, bestColor = 0x66ddff;
   const poi = [
     { p: world.temple.pos, c: 0xffb45a },
-    { p: world.vault.pos, c: state.synced ? 0xffa040 : 0x9c7edb },
+    { p: world.vault.pos, c: state.synced ? 0x98dedc : 0x9c7edb },
     { p: world.anomalies[P.anomaly.index].group.position, c: 0xb9a0ef },
   ];
   for (const sc of world.scrollCaches || []) {
@@ -3255,6 +3316,22 @@ function emergencyRepair() {
 }
 
 /* ================================================================= СТАРТ */
+let departureTime=0;
+function finishDeparture(){
+  if(mode!=='departure')return;
+  animateDeparture(world.lander,rover,camera,departureDuration,0);
+  const {exitX,exitZ}=LANDING_SITE;
+  rover.placeAt(exitX,exitZ,[exitX+3,exitZ-4]);
+  cam.pos.copy(camera.position);cam.target.copy(rover.pos);
+  for(const key in keys) keys[key]=false;
+  audio.setEngine(0,false);
+  document.body.classList.remove('departing');
+  $('skipDeparture').hidden=true;
+  say([{who:'МИРА',text:STORY_TEXT.intro},
+    {who:'ЛЕВ',text:'Начнём со схронов. Веди на сигнал радара, у самой пластины нажми F.'}],'explore');
+  saveGame();
+}
+
 function begin() {
   if (mode !== 'menu') return;
   const saved = readSave();
@@ -3274,13 +3351,12 @@ function begin() {
     mode = 'explore';
     toast('Экспедиция продолжена');
   } else {
-    mode = 'explore';
     applyState(state);
-    say([
-      { who: 'МИРА', text: STORY_TEXT.intro },
-      { who: 'ЛЕВ', text: `Идём к каменной плите с письменами. Навигатор покажет — ${STORY.objective(state, rover.pos).hint}.` },
-      { who: 'НИНА', text: 'Ухожу в ретрансляцию: с «Одиссея» нас слышат, пока держится связь. На связь выхожу каждый час.' },
-    ], 'explore');
+    mode='departure';departureTime=0;
+    document.body.classList.add('departing');
+    $('skipDeparture').hidden=false;
+    animateDeparture(world.lander,rover,camera,0,0);
+    return;
   }
   requestLook();
   saveGame();
@@ -3293,6 +3369,14 @@ function newGame() {
 
 /* ============================================================ ПРИВЯЗКА UI */
 function bindUi() {
+  $('skipDeparture').onclick=finishDeparture;
+  $('sigPause').onclick=()=>openPause();
+  $('sigFreq').oninput=e=>{sig.freq=Number(e.target.value);};
+  $('sigPhase').oninput=e=>{sig.phase=Number(e.target.value);};
+  const transmit=$('sigTransmit');
+  transmit.onpointerdown=e=>{transmit.setPointerCapture(e.pointerId); signalPointer=true;};
+  transmit.onlostpointercapture=transmit.onpointerup=transmit.onpointercancel=()=>{signalPointer=false;};
+
   $('startBtn').addEventListener('click', begin);
   $('trSubmit').addEventListener('click', () => {
     if (tr.typing) { finishTyping(); return; }
@@ -3397,7 +3481,6 @@ window.__avaris = {
   terrain: { heightAt, meshHeightAt },
   get state() { return state; },
   get mode() { return mode; },
-  get moundAnim() { return moundAnim; },
   begin, saveGame, readSave,
   handDig, handGrow,
   get whiteout() { return whiteT; },

@@ -27,7 +27,7 @@ const WHEEL_CENTERS = [
  * Склеивает список {geometry, material, matrix} в по одному мешу на материал.
  * Геометрии переводятся в non-indexed (иначе индексы разных мешей не сложить).
  */
-function mergeByMaterial(parts) {
+export function mergeByMaterial(parts) {
   const buckets = new Map();
   for (const part of parts) {
     const g = part.geometry.index ? part.geometry.toNonIndexed() : part.geometry.clone();

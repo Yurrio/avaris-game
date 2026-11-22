@@ -94,7 +94,7 @@ export function fbm2(x, y, oct) {
 }
 
 /* ------------------------------------------------------------- большая гора */
-const MOUNT = { x: -18, z: 34, r: 128, h: 88, pow: 2.2 };
+const MOUNT = { x: -33, z: -99, r: 101, h: 39, pow: 1.8 };
 
 /* ------------------------------------- ручные шурфы (копать где угодно) */
 export const HAND_DIGS = 10;        // сколько шурфов за экспедицию
@@ -258,7 +258,7 @@ export function rawHeightAt(x, z) {
   return h;
 }
 const SUMMIT_R = 52;      // радиус зоны среза
-const SUMMIT_DROP = 29;   // насколько срезаем макушку (меса под храм)
+const SUMMIT_DROP = 21;   // насколько срезаем макушку (меса под храм)
 const SUMMIT_SOFT = 9;    // ширина мягкого перехода
 let _level = null;
 
@@ -272,6 +272,71 @@ export function gradientAt(x, z, eps = 1.4) {
 /* Физика и расстановка объектов идут по ТОЙ ЖЕ триангуляции, что и картинка:
    две плоскости на ячейку. Иначе всё висит в воздухе на крутых склонах. */
 let _nodes = null;
+let archivePad = null;
+
+// Survey sites on the original relief. Grade only the visible/drivable mesh,
+// so adding the archive cannot move the landmarks in an existing expedition.
+export function setArchivePad(x, z) {
+  archivePad = { x, z, level: Math.min(mesaAt(x,z),mesaAt(x-44,z+30)+1) };
+  _nodes = null;
+}
+
+// Surveyed ascent from the mechanism court, in driving order.
+const roadKnots = [[11,0],[4,-15],[-4,-30],[-2,-48],[-2,-61],[8,-73],[13,-85],[8,-96],[-5,-103],[-20,-103],[-33,-99]];
+// Round each survey corner so the shelf follows the flank in a single sweep.
+export const ASCENT = [roadKnots[0]];
+for(let i=0;i<roadKnots.length-1;i++) {
+  const a=roadKnots[i],b=roadKnots[i+1];
+  for(const t of [.25,.75]) ASCENT.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t]);
+}
+ASCENT.push(roadKnots.at(-1));
+const roadSegments=[];
+for(let i=1;i<ASCENT.length;i++) {
+  const [x,z]=ASCENT[i-1], [bx,bz]=ASCENT[i];
+  const dx=bx-x,dz=bz-z,length=Math.hypot(dx,dz);
+  roadSegments.push({x,z,dx,dz,length});
+}
+const footLevel=mesaAt(...ASCENT[0]);
+const approachRadius=Math.hypot(ASCENT[0][0]-TEMPLE.x,ASCENT[0][1]-TEMPLE.z);
+export function onAscent(x,z,radius=7) {
+  if (x < -33-radius || x>13+radius || z < -103-radius || z>radius) return null;
+  let best=null, nearest=radius;
+  for(const seg of roadSegments) {
+    const t=clamp(((x-seg.x)*seg.dx+(z-seg.z)*seg.dz)/(seg.length*seg.length),0,1);
+    const distance=Math.hypot(x-seg.x-t*seg.dx,z-seg.z-t*seg.dz);
+    if(distance>=nearest) continue;
+    nearest=distance;
+    const radiusFromTemple=Math.hypot(x-TEMPLE.x,z-TEMPLE.z);
+    const along=clamp((approachRadius-radiusFromTemple)/(approachRadius-15),0,1);
+    // Crest before the ruin, then meet the level forecourt.
+    best={distance,level:footLevel+(summitLevel()+MOUND_H-footLevel)*along};
+  }
+  return best;
+}
+// Landing gear, garage floor and ramp share a level hardpan at the landing site.
+export const LANDING_SITE = { x:-157, z:103, exitX:-142, exitZ:99 };
+const landingLevel=mesaAt(LANDING_SITE.x,LANDING_SITE.z);
+export function groundNodeHeight(x, z) {
+  let natural = heightAt(x, z);
+  const road=onAscent(x,z,28);
+  if (road) {
+    const moundDistance=Math.hypot(x-TEMPLE.x,z-TEMPLE.z);
+    // Spread the undisturbed mound rise over the whole approach. Excavation
+    // changes only its original footprint, which is the refreshed mesh region.
+    const excavated=MOUND_H*(1-smoothstep(MOUND_FLAT,MOUND_R,moundDistance))-moundHeightAt(x,z);
+    const graded=road.level-excavated-craterAt(x,z);
+    natural=graded+(natural-graded)*smoothstep(4.5,25+3*Math.sin(x*.08+z*.045),road.distance);
+  }
+  const landingDist=Math.hypot(x-LANDING_SITE.x,z-LANDING_SITE.z);
+  if(landingDist<19) {
+    const graded=landingLevel-craterAt(x,z);
+    natural=graded+(natural-graded)*smoothstep(9,19,landingDist);
+  }
+  if (!archivePad) return natural;
+  const radius = Math.hypot(x - archivePad.x, z - archivePad.z);
+  const blend = smoothstep(68, 94, radius);
+  return archivePad.level + (natural - archivePad.level) * blend;
+}
 
 function nodeH(ix, iz) {
   if (!_nodes) {
@@ -279,7 +344,7 @@ function nodeH(ix, iz) {
     _nodes = new Float32Array(N * N);
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
-        _nodes[j * N + i] = heightAt(-GRID_HALF + i * GRID_CELL, -GRID_HALF + j * GRID_CELL);
+        _nodes[j * N + i] = groundNodeHeight(-GRID_HALF + i * GRID_CELL, -GRID_HALF + j * GRID_CELL);
       }
     }
   }
@@ -297,7 +362,7 @@ export function refreshNodes(x, z, r) {
   if (_nodes) {
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
-        _nodes[j * N + i] = heightAt(-GRID_HALF + i * c, -GRID_HALF + j * c);
+        _nodes[j * N + i] = groundNodeHeight(-GRID_HALF + i * c, -GRID_HALF + j * c);
       }
     }
   }
@@ -381,11 +446,12 @@ export function biomeIdAt(x, z, h = heightAt(x, z)) {
   if (r > ZONE_R * 0.88 * zoneBulge(Math.atan2(z, x))) return 'edge';
 
   // снег только на самой вершине
-  if (h > 60) return 'snow';
+  if (h > 52) return 'snow';
 
   // камень: склоны большой горы и крупные скальные выходы
   const dMount = Math.hypot(x - MOUNT.x, z - MOUNT.z);
   if (dMount < MOUNT.r * 0.54) return 'stone';
+  if (x < -65 && z < -15) return 'oasis';
   const rocky = fbm2(x * 0.0125 - 71, z * 0.0125 + 37, 3);
   if (rocky > 0.52) return 'stone';
 
@@ -399,6 +465,7 @@ export function biomeIdAt(x, z, h = heightAt(x, z)) {
 export function biomeAt(x, z) {
   const h = heightAt(x, z);
   const id = biomeIdAt(x, z, h);
+  const deadForest=id==='oasis' && x < -65 && z < -15;
   const m = fbm2(x * 0.02 + 31, z * 0.02 - 17, 3);
 
   let c = BIOMES[id].color;
@@ -413,6 +480,7 @@ export function biomeAt(x, z) {
       c = mixHex(c, 0xd8cdbb, Math.max(0, h - 40) / 45);
       break;
     case 'oasis':
+      if(deadForest){c=mixHex(0x99866c,0x675e52,(m+1)*.5);break;}
       c = mixHex(c, 0x8f9a52, Math.max(0, m) * 0.4);
       c = mixHex(c, 0x4d5b2f, Math.max(0, -m) * 0.35);
       break;
@@ -425,7 +493,7 @@ export function biomeAt(x, z) {
       break;
     default: break;
   }
-  return { id, name: BIOMES[id].name, color: c, elevation: h,
+  return { id, name: deadForest ? 'ВЫСОХШИЙ ЛЕС' : BIOMES[id].name, color: c, elevation: h,
            rock: BIOMES[id].rock, accent: BIOMES[id].accent };
 }
 
@@ -463,20 +531,8 @@ export function pickSites(rnd, count, opts = {}) {
 export function planWorld(seed = 20261107) {
   const rnd = mulberry32(seed);
 
-  /* ахолы: по одному в разные биомы, не ближе 66 друг от друга */
-  const used = new Map();
-  const beacons = pickSites(rnd, 6, {
-    minDist: 62, maxR: ZONE_R - 30, maxSlope: 0.38,
-    filter: (p, h) => {
-      const id = biomeIdAt(p[0], p[1], h);
-      if (id === 'edge') return false;
-      const c = used.get(id) || 0;
-      if (c >= 2) return false;
-      used.set(id, c + 1);
-      return true;
-    },
-  });
-
+  const sites = coords => coords.map(p => ({p, h:heightAt(...p), biome:biomeIdAt(...p)}));
+  const beacons = sites([[-88,-11],[-33,48],[66,12],[107,52],[37,90],[-26,-41]]);
   /* осколки: по два у маяка + россыпь */
   const shards = [];
   for (const b of beacons) {
@@ -496,81 +552,10 @@ export function planWorld(seed = 20261107) {
     shards.push({ p: s.p, cluster: -1 });
   }
 
-  /* --- плита с письменами (сюжетный центр) --- */
-  let tabletSites = pickSites(rnd, 1, {
-    maxR: ZONE_R - 70, maxSlope: 0.13, minH: 9, maxH: 26,
-    filter: (p) => beacons.every((b) => dist2(p, b.p) > 78),
-  });
-  if (!tabletSites.length) {
-    tabletSites = pickSites(rnd, 1, { maxR: ZONE_R - 60, maxSlope: 0.3 });
-  }
-  const tablet = tabletSites[0] ||
-    { p: [46, -58], h: heightAt(46, -58), biome: biomeIdAt(46, -58) };
-
-  /* три древности вокруг плиты: не вплотную к ней, а разнесённые на 36–62 м
-     по своим сторонам света (раньше стояли в 16 м и лепились друг к другу) */
-  const ART_MIN = 46, ART_MAX = 74, ART_GAP = 52;
-  const words = [];
-  const baseAng = rnd() * Math.PI * 2;
-  for (let i = 0; i < 3; i++) {
-    const want = baseAng + i * (Math.PI * 2 / 3);
-    let best = null, bestScore = 1e9;
-    for (let a = 0; a < Math.PI * 2; a += 0.08) {
-      for (let rr = ART_MIN; rr <= ART_MAX; rr += 2) {
-        const p = [tablet.p[0] + Math.cos(a) * rr, tablet.p[1] + Math.sin(a) * rr];
-        if (Math.hypot(p[0], p[1]) > ZONE_R - 30) continue;
-        if (words.some((w) => dist2(p, w.p) < ART_GAP)) continue;
-        if (beacons.some((b) => dist2(p, b.p) < 42)) continue;
-        const sl = slopeAt(p[0], p[1]);
-        if (sl > 0.34) continue;
-        const angErr = Math.abs(Math.atan2(Math.sin(a - want), Math.cos(a - want)));
-        // ровно, в свою сторону света и подальше от соседей
-        const score = sl * 12 + angErr * 1.4 + rr * 0.10;
-        if (score < bestScore) { bestScore = score; best = p; }
-      }
-    }
-    if (!best) {
-      const a = baseAng + i * (Math.PI * 2 / 3);
-      best = [tablet.p[0] + Math.cos(a) * 58, tablet.p[1] + Math.sin(a) * 58];
-    }
-    words.push({ p: best, h: heightAt(best[0], best[1]), biome: biomeIdAt(best[0], best[1]) });
-  }
-
-  /** Держит точку подальше от плиты и всех трёх древностей сразу */
-  const awayFromNet = (p, r) =>
-    dist2(p, tablet.p) > r && words.every((w) => dist2(p, w.p) > r);
-
-  /* Архив — в стороне от сюжетного узла */
-  let vaultSites = pickSites(rnd, 1, {
-    maxR: ZONE_R - 46, maxSlope: 0.16, minH: 8, maxH: 34,
-    filter: (p) => beacons.every((b) => dist2(p, b.p) > 95) && awayFromNet(p, 85),
-  });
-  if (!vaultSites.length) {
-    vaultSites = pickSites(rnd, 1, {
-      maxR: ZONE_R - 40, maxSlope: 0.26,
-      filter: (p) => beacons.every((b) => dist2(p, b.p) > 70) && awayFromNet(p, 60),
-    });
-  }
-  const vault = vaultSites[0] ||
-    { p: [0, -120], h: heightAt(0, -120), biome: biomeIdAt(0, -120) };
-
-  /* аномалии висят в воздухе — реже и не над сюжетными точками */
-  const anomalies = pickSites(rnd, 7, {
-    minDist: 62, maxR: ZONE_R - 20, maxSlope: 50,
-    filter: (p) => awayFromNet(p, 55)
-      && beacons.every((b) => dist2(p, b.p) > 42)
-      && dist2(p, vault.p) > 45,
-  });
-
-  /* руины — ровные места, подальше от всего сюжетного */
-  const ruins = pickSites(rnd, 10, {
-    minDist: 46, maxR: ZONE_R - 34, maxSlope: 0.26,
-    filter: (p) => dist2(p, tablet.p) > 46
-      && words.every((w) => dist2(p, w.p) > 32)
-      && beacons.every((b) => dist2(p, b.p) > 42)
-      && anomalies.every((a) => dist2(p, a.p) > 36)
-      && dist2(p, vault.p) > 42,
-  });
-
+  const [tablet] = sites([[40,-20]]);
+  const words = sites([[27,-18],[42,-30],[50,-10]]);
+  const [vault] = sites([[122,-91]]);
+  const anomalies = sites([[78,-61]]);
+  const ruins = sites([[-132,-16],[-105,-65],[-102,30],[-72,78],[-53,-8],[9,60],[97,28],[16,-131]]);
   return { beacons, shards, anomalies, ruins, vault, tablet, words, seed };
 }

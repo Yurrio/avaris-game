@@ -844,7 +844,7 @@ export class Rover {
         const d2 = dx * dx + dz * dz;
         if (d2 > rr * rr || d2 < 1e-6) continue;
         // в прыжке над невысоким препятствием не задеваем
-        if (dy > P.CLEAR_OVER && !o.bump) continue;
+        if (dy > P.CLEAR_OVER && !o.bump && o.kind !== 'barrier') continue;
         const d = Math.sqrt(d2);
         const nx = dx / d, ny = 0, nz = dz / d;
 

@@ -146,16 +146,16 @@ function materials() {
 /* ------------------------------------------------------------------ пломба */
 function faceTexture(char, color) {
   const cv = document.createElement('canvas');
-  cv.width = cv.height = 256;
+  cv.width = cv.height = 512;              // 512: знак остаётся чётким вблизи
   const g = cv.getContext('2d');
-  g.clearRect(0, 0, 256, 256);
+  g.clearRect(0, 0, 512, 512);
   g.fillStyle = color;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.font = canvasFont(156);
-  g.fillText(char, 128, 132);
+  g.font = canvasFont(312);               // та же доля кадра, что 156 из 256
+  g.fillText(char, 256, 264);
   const t = new THREE.CanvasTexture(cv);
-  t.anisotropy = 4;
+  t.anisotropy = 8;
   return t;
 }
 
@@ -176,12 +176,12 @@ export function makeMedallion(r, offKey, onKey) {
   med.add(inner);
   const face = (id, color) => {
     const m = new THREE.Mesh(
-      new THREE.CircleGeometry(r * 0.84, 44),
+      new THREE.PlaneGeometry(r*1.68,r*1.68),
       new THREE.MeshBasicMaterial({
-        map: faceTexture(glyphOf(id), color), transparent: true, depthWrite: false,
+        map: faceTexture(glyphOf(id), color), alphaTest:.3, toneMapped:false, polygonOffset:true, polygonOffsetFactor:-1,
       }),
     );
-    m.position.z = 0.058;
+    m.position.z = 0.063;
     return m;
   };
   const off = face(offKey, '#efe6ff');
@@ -195,30 +195,6 @@ export function makeMedallion(r, offKey, onKey) {
  * Бронзовая плита-подложка под пломбу: гарантирует, что знак лежит на ровной
  * вертикальной поверхности, даже если основание скульптурное или круглое.
  */
-export function mountPlate(r) {
-  const M = materials();
-  const g = new THREE.Group();
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(r * 2.55, r * 3.0, 0.16), M.bronze);
-  slab.castShadow = true; slab.receiveShadow = true;
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(r * 2.85, r * 3.3, 0.1), M.iron);
-  frame.position.z = -0.08;
-  frame.castShadow = true;
-  g.add(frame, slab);
-  // заклёпки по углам плиты
-  for (const sx of [-1, 1]) {
-    for (const sy of [-1, 1]) {
-      const rivet = new THREE.Mesh(new THREE.SphereGeometry(r * 0.115, 10, 8), M.iron);
-      rivet.position.set(sx * r * 1.1, sy * r * 1.32, 0.1);
-      g.add(rivet);
-    }
-  }
-  // литая рамка вокруг диска
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 1.14, r * 0.05, 8, 36), M.iron);
-  ring.position.z = 0.1;
-  g.add(ring);
-  return g;
-}
-
 /**
  * Габариты собранного механизма в его локальных координатах.
  * skip — объекты, которые не должны учитываться (пломба, плита, подвижное).
@@ -243,53 +219,6 @@ export function localBox(group, skip = [], yRange = null) {
   return box;
 }
 
-/**
- * Поставить пломбу (и её плиту) на переднюю грань уже собранного механизма.
- * Габариты считаются в локальных координатах группы, поэтому подходит и для
- * китовых оснований произвольной формы. yFrac — доля высоты снизу вверх.
- */
-export function fitMedallion(site, yFrac = 0.42, yOverride = null) {
-  const med = site.medallion;
-  const plate = site.plate;
-  if (!med) return null;
-  const skip = [med, ...(site.moving || [])];
-  if (plate) skip.push(plate);
-  const box = localBox(site.group, skip);
-  if (box.isEmpty()) return null;
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const y = yOverride == null ? box.min.y + size.y * yFrac : yOverride;
-  // передняя грань именно на этой высоте: лучем из точки перед механизмом
-  // ищем настоящую поверхность, иначе плитка висит в воздухе перед
-  // сужающейся башней или утопает внутрь скульптурного основания
-  site.group.updateMatrixWorld(true);
-  const fwd = new THREE.Vector3(0, 0, 1).transformDirection(site.group.matrixWorld).normalize();
-  const basePt = new THREE.Vector3(0, y, 0).applyMatrix4(site.group.matrixWorld);
-  const ray = new THREE.Raycaster(basePt.clone().addScaledVector(fwd, 8), fwd.clone().negate(), 0, 16);
-  const skipHit = (o) => { for (let n = o; n; n = n.parent) if (skip.includes(n)) return true; return false; };
-  const hit = ray.intersectObject(site.group, true).find((h) => !skipHit(h.object));
-  let z;
-  if (hit) {
-    const inv = new THREE.Matrix4().copy(site.group.matrixWorld).invert();
-    z = hit.point.clone().applyMatrix4(inv).z;
-  } else {
-    const slab = localBox(site.group, skip, [y - 0.9, y + 0.9]);
-    z = (slab.isEmpty() ? box : slab).max.z;
-  }
-  if (plate) {
-    plate.position.set(0, y, z + 0.13);   // рамка плиты упирается в поверхность
-    plate.rotation.set(0, 0, 0);
-  }
-  med.position.set(0, y, z + 0.31);      // диск лежит на плите, не в воздухе
-  med.rotation.set(0, 0, 0);
-  return { y, z, size };
-}
-
-/**
- * Развести стойки, кабину и груз по сторонам от основания: считается ширина
- * башни, и всё подвижное уходит наружу — кабина справа, противовес слева.
- * Никакая часть механизма не проходит сквозь другую ни в одном положении.
- */
 export function placeLiftTrack(site) {
   if (!site || !site.colRight) return null;
   const skip = [site.medallion, ...(site.moving || [])];
@@ -415,8 +344,12 @@ export function buildGate() {
     doors.push(hinge);
   }
 
-  const med = makeMedallion(0.82, 'shut', 'open');
-  med.group.position.set(0, DOOR_H + 1.85, 1.02);   // на бронзовом фризе
+  const keystone = new THREE.Mesh(new THREE.CylinderGeometry(1.04,.87,.38,8),M.iron);
+  keystone.rotation.x=Math.PI/2;
+  keystone.position.set(0,DOOR_H+1.71,1.02);
+  g.add(keystone);
+  const med = makeMedallion(.92, 'shut', 'open');
+  med.group.position.set(0, DOOR_H + 1.71, 1.22);   // на бронзовом фризе
   g.add(med.group);
 
   return {
@@ -427,7 +360,7 @@ export function buildGate() {
     rim: med.rim,
     left: doors[0],
     right: doors[1],
-    shot: { fov: 46, pad: 1.05, yaw: 15 },
+    shot: { fov: 46, pad: .95, yaw: 7 },
   };
 }
 
@@ -470,23 +403,25 @@ export function buildBeacon(kitModel) {
   g.add(flight);
 
   // пломба — на неподвижной плите, привинченной к передней грани основания
-  const med = makeMedallion(0.62, 'dark', 'burn');
-  med.group.position.set(0, 1.3, 2.6);
+  // A sloped inscription stone is bonded into the front of the altar plinth.
+  const profile=new THREE.Shape();
+  profile.moveTo(0,0);profile.lineTo(1.30,0);profile.lineTo(.48,1.56);profile.lineTo(0,1.56);profile.closePath();
+  const plinth=new THREE.Mesh(new THREE.ExtrudeGeometry(profile,{depth:1.96,bevelEnabled:false}),M.stoneDark);
+  plinth.rotation.y=-Math.PI/2;plinth.position.set(.98,0,2.1);g.add(plinth);
+  const med = makeMedallion(.76, 'dark', 'burn');
+  med.group.rotation.x=-Math.atan2(.82,1.56);
+  med.group.position.set(0,.81,3.01);
   g.add(med.group);
-  const plate = mountPlate(0.62);
-  plate.position.set(0, 1.3, 2.5);
-  g.add(plate);
 
   return {
     group: g,
     markOff: med.off,
     markOn: med.on,
     medallion: med.group,
-    plate,
     rim: med.rim,
     flame, fglow, flight,
     fallback,
-    shot: { fov: 45, pad: 1.08, yaw: 12 },
+    shot: { fov: 45, pad: .94, yaw: 6 },
   };
 }
 
@@ -658,20 +593,16 @@ export function buildLift(kitModel) {
   };
   const ropes = [mkRope(COL_X + 1.3, 'cabin'), mkRope(-COL_X - 1.3, 'counter')];
 
-  // --- пломба на передней грани башни: кабина и груз идут сбоку, знак не закрыт
-  const med = makeMedallion(0.62, 'down', 'up');
-  med.group.position.set(0, 3.1, 2.6);
-  g.add(med.group);
-  const plate = mountPlate(0.62);
-  plate.position.set(0, 3.1, 2.5);
-  g.add(plate);
+  // --- пломба на ВЕРХУ кабины, вывеской над проёмом: на входе она мешает
+  const plaque=wall(1.2,1.05,.14,0,CAB_H+.78,.9);
+  const med=makeMedallion(.48,'down','up');
+  med.group.position.z=.09;plaque.add(med.group);
 
   return {
     group: g,
     markOff: med.off,
     markOn: med.on,
     medallion: med.group,
-    plate,
     rim: med.rim,
     platform,
     counter,
@@ -688,6 +619,6 @@ export function buildLift(kitModel) {
     lowY: 0.85,
     counterLow: 0.85,
     pulleyY: COL_H + 0.55,
-    shot: { fov: 45, pad: 1.08, yaw: 16 },
+    shot: { fov: 45, pad: .96, yaw: 8 },
   };
 }

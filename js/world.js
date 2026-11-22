@@ -1,3 +1,4 @@
+import {buildLander} from './lander.js';
 /* ============================================================================
    XR-7 · «Туманная котловина» — сборка мира.
    Ровный (но неровный по рельефу) участок с одной большой горой,
@@ -5,7 +6,7 @@
    ========================================================================== */
 import * as THREE from 'three';
 import {
-  ZONE_R, WORLD_SIZE, GRID_N, GRID_CELL, heightAt, meshHeightAt, meshNormalAt,
+  ZONE_R, WORLD_SIZE, GRID_N, GRID_CELL, LANDING_SITE, onAscent, groundNodeHeight, setArchivePad, meshHeightAt, meshNormalAt,
   meshPlaneAt, biomeAt, biomeIdAt, slopeAt, SUMMIT, summitLevel,
   FOG_START, FOG_HARD, fogAt, TEMPLE, MOUND_R, MOUND_H, MOUND_FLAT,
   moundHeightAt, moundDepthAt, digProgress, refreshNodes, craterDepthAt,
@@ -17,7 +18,7 @@ import { ENV_MODELS, COOL_CRYSTAL_MODEL, TOXIC_CRYSTAL_MODEL, pickPlantModel,
 import { cityObstacles, buildCity, buildSummitShrine } from './world-kit.js';
 import { TANGUT, glyphOf, canvasFont } from './tangut.js';
 import { buildGate as buildMechGate, buildBeacon as buildMechBeacon,
-  buildLift as buildMechLift, setKitBase, fitMedallion, placeLiftTrack } from './mech.js';
+  buildLift as buildMechLift, setKitBase, placeLiftTrack } from './mech.js';
 import { SCROLLS, scrollSites } from './story.js';
 import { GLTFLoader } from '../vendor/loaders/GLTFLoader.js';
 
@@ -94,6 +95,11 @@ function groundColorInto(c, x, z, h, f) {
     c.lerp(SOIL, Math.min(0.85, 0.35 + depth * 0.6));
     c.multiplyScalar(0.86 + strata * 0.22);
   }
+  const track=onAscent(x,z,5);
+  if(track) {
+    const shoulder=.65*Math.sin(x*.21+z*.09);
+    c.lerp(SOIL,(1-smoothstep(1.4,5.5,track.distance+shoulder))*.20);
+  }
   // свежий грунт в ручном шурфе виден издалека
   const pit = craterDepthAt(x, z);
   if (pit > 0.05) {
@@ -123,10 +129,10 @@ function groundCell(ix, iz, pos, nor, col, o, grain) {
   const x0 = -half + ix * cell, z0 = -half + iz * cell;
   const x1 = x0 + cell, z1 = z0 + cell;
 
-  const h00 = heightAt(x0, z0);
-  const h10 = heightAt(x1, z0);
-  const h01 = heightAt(x0, z1);
-  const h11 = heightAt(x1, z1);
+  const h00 = groundNodeHeight(x0, z0);
+  const h10 = groundNodeHeight(x1, z0);
+  const h01 = groundNodeHeight(x0, z1);
+  const h11 = groundNodeHeight(x1, z1);
 
   const f = iz * GRID_N + ix;
   const c = _cTmp;
@@ -284,6 +290,11 @@ function buildStars(rnd) {
 }
 
 /* ==================================================== СТЕНА ТУМАНА ПО КРАЮ */
+// All six cloud shells sample the same seamless, alpha-painted dust belt.
+const stormDust=new THREE.TextureLoader().load(new URL('../assets/world-kit/storm-dust.png',import.meta.url).href);
+stormDust.colorSpace=THREE.SRGBColorSpace;
+stormDust.wrapS=THREE.RepeatWrapping;
+
 function fogWallLayer(radius, height, opacity, speed, seed) {
   const geo = new THREE.CylinderGeometry(radius, radius, height, 96, 1, true);
   // Контур не круглый: тянем кольцо по тому же закону, что и граница зоны
@@ -300,6 +311,7 @@ function fogWallLayer(radius, height, opacity, speed, seed) {
   geo.computeBoundingSphere();
   const mat = new THREE.ShaderMaterial({
     uniforms: {
+      uDust: {value:stormDust},
       uColor: { value: new THREE.Color(0xb4c8d6) },
       uTime: { value: 0 },
       uOpacity: { value: opacity },
@@ -313,18 +325,19 @@ function fogWallLayer(radius, height, opacity, speed, seed) {
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }`,
     fragmentShader: /* glsl */`
+      uniform sampler2D uDust;
       uniform vec3 uColor;
       uniform float uTime, uOpacity, uSpeed, uSeed;
       varying vec2 vUv;
       void main() {
         // у земли плотнее, кверху растворяется
         float a = pow(clamp(1.0 - vUv.y * 1.12, 0.0, 1.0), 1.7) * uOpacity;
-        // два слоя клубления
-        float n = sin(vUv.x * 46.0 + uTime * 0.22 * uSpeed + uSeed) * 0.5
-                + sin(vUv.x * 13.0 - uTime * 0.15 * uSpeed + uSeed * 2.0) * 0.35
-                + sin(vUv.y * 9.0 + uTime * 0.11) * 0.15;
-        a *= 0.80 + 0.20 * n;
-        gl_FragColor = vec4(uColor, clamp(a, 0.0, 0.97));
+        float scroll=uTime*.009*uSpeed;
+        vec4 dust=texture2D(uDust,vec2(vUv.x*5.0+scroll+uSeed, .32+vUv.y*.78));
+        float billow=smoothstep(.08,.72,dust.a);
+        vec3 shade=mix(uColor*.52,dust.rgb*.67+uColor*.65,billow);
+        a *= .42+.64*billow;
+        gl_FragColor=vec4(shade, clamp(a,0.0,.97));
       }`,
     transparent: true,
     depthWrite: false,
@@ -946,8 +959,7 @@ function buildArtifactSite(kind) {
         if (kind === 'lift') placeLiftTrack(site);   // кабина и груз — перед башней
         site.group.updateMatrixWorld(true);
         // пломбу со знаком сажаем на переднюю грань основания — ровная вертикаль
-        fitMedallion(site, kind === 'beacon' ? 0.38 : 0.42);
-        site.group.updateMatrixWorld(true);
+
       })
       .catch((e) => console.warn('[XR-7] основание механизма не загрузилось:', kitId, e));
   }
@@ -1240,7 +1252,7 @@ function shapeArc(line, from, to, jitter) {
 
 function buildAnomaly(rnd) {
   const g = new THREE.Group();
-  const hue = [0x35e0ff, 0xc07bff, 0x59ffb0][(rnd() * 3) | 0];
+  const hue = 0xc07bff;
 
   const coreMat = new THREE.MeshStandardMaterial({
     color: hue, emissive: hue, emissiveIntensity: 1.8,
@@ -1414,22 +1426,26 @@ function buildVault() {
     g.add(wall);
   }
 
+  const fallback = new THREE.Group();
+  fallback.add(...g.children.slice());
+  g.add(fallback);
+
   /* --- завеса аномалии: пока буря не укрощена, внутрь не пускает --- */
   const barrierMat = new THREE.MeshBasicMaterial({
     color: 0x9c7edb, transparent: true, opacity: 0.14, side: THREE.DoubleSide,
     depthWrite: false, fog: false,
   });
-  const barrier = new THREE.Mesh(new THREE.CylinderGeometry(40, 40, 90, 48, 1, true), barrierMat);
+  const barrier = new THREE.Mesh(new THREE.CylinderGeometry(50, 50, 90, 48, 1, true), barrierMat);
   barrier.position.y = 44;
   g.add(barrier);
   const barrierWire = new THREE.Mesh(
-    new THREE.CylinderGeometry(40.2, 40.2, 89, 24, 6, true),
+    new THREE.CylinderGeometry(50.2, 50.2, 89, 24, 6, true),
     new THREE.MeshBasicMaterial({ color: 0xb9a0ef, wireframe: true, transparent: true, opacity: 0.10, depthWrite: false, fog: false })
   );
   barrierWire.position.y = 44;
   g.add(barrierWire);
 
-  return { group: g, ring, ring2, core, coreMat, beamMat, glow, spire, tip, tipMat, barrier, barrierWire, barrierMat };
+  return { group: g, fallback, ring, ring2, core, coreMat, beamMat, glow, spire, tip, tipMat, barrier, barrierWire, barrierMat };
 }
 
 /* ==================================================== ИНДЕКС СТОЛКНОВЕНИЙ */
@@ -1494,6 +1510,7 @@ export class World {
 
     const rnd = mulberry32(2718);
     const P = this.plan;
+    setArchivePad(...P.vault.p);
 
     /* --- небо, земля, туман --- */
     this.sky = buildSky();
@@ -1504,6 +1521,15 @@ export class World {
     this.ground = buildGround();
     scene.add(this.ground);
 
+    this.lander=buildLander();
+    scene.add(this.lander.root);
+    this.reserved.push({x:LANDING_SITE.x+2,z:LANDING_SITE.z,r:13});
+    for(const dx of [-4,-1,2.7]){
+      this.obstacles.push({pos:new THREE.Vector3(LANDING_SITE.x+dx,this.lander.root.position.y,LANDING_SITE.z),r:2.65,kind:'wall'});
+    }
+    for(const dz of [-3.4,3.4]){
+      this.obstacles.push({pos:new THREE.Vector3(LANDING_SITE.x,this.lander.root.position.y,LANDING_SITE.z+dz),r:1.75,kind:'wall'});
+    }
     this.wall = buildFogWall(rnd);
     scene.add(this.wall.group);
     this.stormRing = buildStormRing();
@@ -1546,7 +1572,7 @@ export class World {
     for (const a of P.anomalies) {
       const parts = buildAnomaly(rnd);
       const ground = meshHeightAt(a.p[0], a.p[1]);
-      const y = ground + 20 + rnd() * 16;
+      const y = ground + 11;
       parts.group.position.set(a.p[0], y, a.p[1]);
       parts.groundY = ground;
       scene.add(parts.group);
@@ -1570,16 +1596,18 @@ export class World {
 
     /* --- Архив / Сердце бури --- */
     const v = buildVault();
-    placeOnGround(v.group, P.vault.p[0], P.vault.p[1], 0.5);
+    placeOnGround(v.group, P.vault.p[0], P.vault.p[1], 0.16);
     scene.add(v.group);
     this.vault = v;
     this.vault.pos = v.group.position.clone();
     this.vault.corePos = v.group.position.clone().addScaledVector(UP, 9.5);
     this.vault.open = false;
-    this.obstacles.push({ pos: this.vault.pos.clone(), r: 13 });
+    this.archiveWalls = [{ pos: this.vault.pos.clone(), r: 13 }];
+    this.reserved.push({ x: v.pos.x, z: v.pos.z, r: 26 });
+    this.loadCityArchive(P.anomalies[0].p).catch((err) => console.warn('[АВАРИС] Хранилище:', err));
     // завеса вокруг финала: пока не снята — внутрь не проехать
     this.barrierOpen = false;
-    this.coreColliders = [{ pos: this.vault.pos.clone(), r: 34 }];
+    this.coreColliders = [{ pos: this.vault.pos.clone(), r: 50 }];
 
     /* --- плиты с письменами в мире больше нет: три текста закопаны в схронах --- */
     this.tablet = null;
@@ -1654,6 +1682,8 @@ export class World {
     this.citySite = { center: cityCenter, from: cityFrom };
 
     /* --- камни, кристаллы, растения --- */
+    for (const site of this.scrollCaches || []) this.reserved.push({x:site.pos.x,z:site.pos.z,r:12});
+    this.reserved.push({x:P.anomalies[0].p[0],z:P.anomalies[0].p[1],r:10});
     this._buildProps(rnd);
 
     /* --- фазовый ключ на алтаре храма --- */
@@ -1666,7 +1696,7 @@ export class World {
     this.gatewayColliders = [];
     // вершину занимает набор avaris-world-kit: коллайдеры старого храма не нужны
     this.kitSummit = true;
-    const tabletDir = { x: P.tablet.p[0] - SUMMIT.x, z: P.tablet.p[1] - SUMMIT.z };
+    const tabletDir = { x: 13, z: -4 };
     const summitYaw = Math.atan2(tabletDir.x, tabletDir.z);
     buildSummitShrine(scene, {
       x: SUMMIT.x, z: SUMMIT.z, y: baseY, yaw: summitYaw, scale: 0.72,
@@ -1737,11 +1767,13 @@ export class World {
         if (o.isMesh || o.isInstancedMesh) { o.castShadow = true; o.receiveShadow = true; }
       });
     }
+    this.vault.barrier.castShadow = this.vault.barrierWire.castShadow = false;
   }
 
   /** Пересобрать индекс коллизий (меняется при раскопках и снятии завесы) */
   _buildGrid() {
     this.grid = new ObstacleGrid();
+    for (const o of this.archiveWalls) this.grid.add(o.pos, o.r, { kind: 'wall' });
     for (const o of this.obstacles) this.grid.add(o.pos, o.r, o.kind ? { kind: o.kind } : null);
     for (const o of this.propObstacles) {
       this.grid.add(o.pos, o.r, { kind: o.kind || 'rock', bump: !!o.bump });
@@ -1758,7 +1790,7 @@ export class World {
       for (const o of this.gatewayColliders) this.grid.add(o.pos, o.r);
     }
     if (!this.barrierOpen && this.coreColliders) {
-      for (const o of this.coreColliders) this.grid.add(o.pos, o.r);
+      for (const o of this.coreColliders) this.grid.add(o.pos, o.r, { kind: 'barrier' });
     }
   }
 
@@ -1780,6 +1812,36 @@ export class World {
   }
 
   queryObstacles(pos) { return this.grid.query(pos); }
+
+  async loadCityArchive([approachX, approachZ]) {
+    const vault = this.vault;
+    const { scene: model } = await new GLTFLoader().loadAsync(KIT_DIR + 'avaris-vault.glb');
+    model.rotation.y = Math.atan2(approachX - vault.pos.x, approachZ - vault.pos.z);
+    model.traverse((o) => {
+      if (o.isMesh) o.castShadow = o.receiveShadow = true;
+    });
+    vault.group.add(model);
+    model.updateWorldMatrix(true, true);
+    vault.scanPos = model.getObjectByName('Rover_scan').getWorldPosition(new THREE.Vector3());
+    model.getObjectByName('Core_focus').getWorldPosition(vault.corePos);
+
+    // The rover resolves XZ circles. Keep the nave open between the shelving
+    // banks; a single bounding circle would block the ramp and the scan point.
+    const walls = [];
+    const wall = (x, z, r) => walls.push({ pos: model.localToWorld(new THREE.Vector3(x, 0, z)), r });
+    for (const side of [-1, 1]) {
+      for (const z of [-12, -8, -4, 0, 4]) wall(side * 8.2, z, 2.4);
+      for (const z of [-11, -5, 1, 6]) wall(side * 13.4, z, 5.2);
+      wall(side * 8.2, 10, 1.6);
+      wall(side * 5.1, -15.5, 2.8);
+    }
+    wall(0, -16, 4.0);
+    wall(0, -7.4, 4.1);
+    this.archiveWalls = walls;
+    vault.model = model;
+    vault.fallback.visible = false;
+    this._buildGrid();
+  }
 
   /**
    * Стена бури сжимается к центру: radius — её радиус, density 0..1 — плотность.
@@ -1823,7 +1885,7 @@ export class World {
     geo.attributes.position.needsUpdate = true;
     geo.attributes.normal.needsUpdate = true;
     geo.attributes.color.needsUpdate = true;
-    geo.computeBoundingSphere();
+    // The perimeter determines the terrain bounds, excavation only lowers interior nodes.
     // открывшиеся части храма становятся преградами
     if (rebuildGrid) this._buildGrid();
     return cells;
@@ -2128,6 +2190,7 @@ export class World {
     };
 
     const free = (p) => {
+      if (onAscent(p.x,p.z) || Math.hypot(p.x+142,p.z-99)<9) return false;
       for (let i = 0; i < this.obstacles.length; i++) {
         const o = this.obstacles[i];
         const rr = o.r + 4;
@@ -2610,14 +2673,15 @@ export class World {
     if (this.scrollCaches) {
       for (const c of this.scrollCaches) {
         const want = c.dug || 0;
-        // предмет лежит в яме и появляется, когда земля снята
-        c.group.position.y = (c.baseY ?? c.group.position.y) - 1.0;
-        c.group.visible = want > 0.75;
-        c.lid.rotation.x = -Math.max(0, (want - 0.75) / 0.25) * 1.9;
-        c.plate.visible = want > 0.08;
-        c.plate.material.opacity = Math.min(0.9, want * 1.2);
-        c.glow.intensity = want * 9;
-        c.glow.position.y = 0.6 + want * 0.5;
+        // ларёк лежит в выкопанной яме и НЕ выезжает из земли: землю снимаем
+        // шурфом, самого его не двигаем
+        c.group.position.y = c.baseY - 0.86;
+        c.group.visible = want > 0.12;
+        c.lid.rotation.x = -Math.max(0, (want - 0.62) / 0.38) * 1.9;
+        c.plate.visible = want > 0.55;
+        c.plate.material.opacity = Math.min(0.9, Math.max(0, (want - 0.55) / 0.45) * 1.2);
+        c.glow.intensity = Math.max(0, want - 0.5) * 16;
+        c.glow.position.y = 0.8;
       }
     }
 
@@ -2626,10 +2690,10 @@ export class World {
       v.tipMat.emissiveIntensity = 1.5 + Math.sin(t * 2.2) * 0.5;
     }
     if (v.barrierMat) {
-      const want = this.barrierOpen ? 0 : 1;
+      const want = this.barrierOpen ? 0 : 1 - (this.transmission || 0) / 100;
       const ease = Math.min(1, dt * 1.6);
-      v.barrierMat.opacity += (0.14 * want - v.barrierMat.opacity) * ease;
-      v.barrierWire.material.opacity += (0.10 * want - v.barrierWire.material.opacity) * ease;
+      v.barrierMat.opacity += (0.26 * want - v.barrierMat.opacity) * ease;
+      v.barrierWire.material.opacity += (0.28 * want - v.barrierWire.material.opacity) * ease;
       v.barrier.visible = v.barrierWire.visible = v.barrierMat.opacity > 0.004;
       v.barrierWire.rotation.y += dt * 0.05;
     }

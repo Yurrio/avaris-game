@@ -58,6 +58,8 @@ const PLAN = [
   { id: 'archive-bay', r: 38, a: 74, yaw: 0, sink: 0.25 },
   { id: 'archive-bay', r: 37, a: 88, yaw: 0, sink: 0.25 },
   { id: 'phase-altar', r: 38, a: 108, yaw: 0, sink: 0.2 },
+  { id: 'crest-tower', r: 48, a: -62, yaw: 14, sink: 0.4 },
+  { id: 'crest-tower', r: 52, a: 115, yaw: -18, sink: 0.4 },
   { id: 'crest-tower', r: 48, a: 180, yaw: 0, sink: 0.4 },
   { id: 'broken-spire', r: 44, a: -100, yaw: 22, sink: 0.3 },
   { id: 'broken-spire', r: 43, a: 142, yaw: -14, sink: 0.3 },
@@ -85,9 +87,12 @@ export function citySpots(center, approach) {
     const x = center.x + Math.cos(ang) * p.r;
     const z = center.z + Math.sin(ang) * p.r;
     // фасад моделей смотрит в +Z → поворачиваем «наружу к подъезду»
-    const yaw = gateAngle - Math.PI / 2 + (p.yaw * Math.PI) / 180;
+    const yaw = Math.PI / 2 - gateAngle + (p.yaw * Math.PI) / 180;
     out.push({ ...p, x, z, yaw, ang });
   }
+  // The tall remnants outline the vanished forest above the first cache.
+  const forest=[[-138,-47],[-134,-62],[-127,-72],[-119,-61],[-113,-76],[-104,-85],[-97,-75],[-105,-53],[-92,-61],[-86,-79],[-80,-68],[-125,-85]];
+  forest.forEach(([x,z],i)=>out.push({id:'dead-canopy',x,z,yaw:i*2.4,sink:.22}));
   return out;
 }
 
@@ -198,23 +203,26 @@ export async function buildCity(scene, center, approach) {
   }));
 
   const added = [];
-  for (const s of spots) {
-    const src = cache[s.id];
-    if (!src) continue;
-    const obj = src.clone(true);
-    meshNormalAt(s.x, s.z, _n);
-    const tilt = new THREE.Quaternion().setFromUnitVectors(UP, _n);
-    const yawQ = new THREE.Quaternion().setFromAxisAngle(UP, s.yaw);
-    obj.quaternion.copy(tilt).multiply(yawQ);
-    obj.position.set(s.x, meshHeightAt(s.x, s.z) - s.sink, s.z);
-    obj.traverse((o) => {
-      if (!o.isMesh) return;
-      o.castShadow = true;
-      o.receiveShadow = true;
+  for (const id of ids) {
+    const placements = spots.filter(spot => spot.id === id).map(spot => {
+      meshNormalAt(spot.x,spot.z,_n);
+      const transform = new THREE.Object3D();
+      if (id==='dune-rocks' || id==='dead-canopy') transform.quaternion.setFromUnitVectors(UP,_n);
+      transform.rotateY(spot.yaw);
+      transform.position.set(spot.x,meshHeightAt(spot.x,spot.z)-spot.sink,spot.z);
+      transform.updateMatrix();
+      return transform.matrix;
     });
-    obj.userData.kitId = s.id;
-    scene.add(obj);
-    added.push(obj);
+    cache[id].traverse(part => {
+      if (!part.isMesh) return;
+      const batch = new THREE.InstancedMesh(part.geometry,part.material,placements.length);
+      placements.forEach((matrix,index) => batch.setMatrixAt(index,new THREE.Matrix4().multiplyMatrices(matrix,part.matrixWorld)));
+      batch.receiveShadow=true;
+      batch.userData.kitId=id;
+      batch.computeBoundingSphere();
+      scene.add(batch);
+      added.push(batch);
+    });
   }
   return added;
 }

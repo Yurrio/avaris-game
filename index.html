@@ -501,6 +501,18 @@
   .cur-meta i{font-style:normal;font-size:10.5px;line-height:1.4;color:#87a6b6}
   .cur-ok{margin-left:auto;font-size:13px;color:#ff9f52;opacity:0;transition:opacity .15s}
   .cur-row.is-on .cur-ok{opacity:1}
+#sigThermal{width:100%;accent-color:#f19a62} #sigReadout{font-variant-numeric:tabular-nums;color:#c2dfda}
+#sigTransmit{touch-action:none;user-select:none;margin-top:10px} #signal .card{max-height:94vh;overflow:auto}
+.tr-g.familiar{outline:1px solid #67b6ac;color:#b7fff3;cursor:pointer}.tr-g.unseen{opacity:.52;cursor:default}
+#ending .card{max-height:90vh;overflow:auto}
+ .instrument{box-sizing:border-box;width:min(880px,95vw);max-height:94vh;overflow:auto;padding:clamp(16px,3vw,36px);background:linear-gradient(125deg,#1c333d,#10232d 45%,#101b25);border:1px solid #48606b;border-top:3px solid #87d8cc;color:#e1efed;box-shadow:0 20px 75px #0009}
+.instrument header,.wave-legend,.tuning,.meters,.cut-layout{display:flex;gap:20px}.instrument header{align-items:center;justify-content:space-between}.instrument header small,.cut-controls small{letter-spacing:2px;color:#a5c1c3;font-size:10px}.instrument h2{font-size:clamp(21px,3vw,32px);margin:6px 0 12px}.instrument p{font-size:14px;line-height:1.45}.instrument .close{position:static;flex-shrink:0}.scope{background:#0b1b24;border:1px solid #3b5962;padding:12px;margin-top:12px}.wave-legend{font-size:12px}.wave-legend span:before{content:"";display:inline-block;width:19px;height:3px;background:#c59cf5;margin-right:7px;vertical-align:middle}.wave-legend span+span:before{background:#92eacb}
+#sigCanvas{height:clamp(90px,19vh,188px);background:none;border:0}#sigReadout{font:13px monospace;margin:9px 0 16px}.tuning label,.meters>div{flex:1;min-width:0}.tuning label{background:#ffffff08;padding:10px 14px;font-size:13px}.tuning output{float:right;color:#afe6d9}.tuning input{width:100%;accent-color:#95d6c6;display:block;margin:10px 0 0}.meters{margin-top:16px}.meters .bar{margin:0}.meters progress{height:8px;display:block}.cut-survey{position:relative;align-self:center;flex:1.8;min-width:0}.cut-survey canvas{width:100%;display:block}.cut-controls{flex:1;min-width:0}.cut-controls h3{margin:0 0 8px}.cut-controls strong{color:#f2cb93}.cut-controls small{display:block;margin:10px 0}.cut-controls button{display:block;width:100%;padding:7px;margin:4px 0;background:#274049;border:1px solid #597980;color:#def3ef}.cut-controls button:disabled{opacity:.34}.cut-survey button{position:absolute;transform:translate(-50%,-50%);border:1px solid #c2a98a;color:#fff;background:#3a3f3b;font:600 12px system-ui;border-radius:4px;padding:3px 6px}.cut-survey button[aria-pressed=true]{background:#254c46;border-color:#bbffdd}.cut-survey button:disabled{opacity:.55}.instrument [hidden]{display:none!important}
+@media(max-width:650px){.cut-layout{display:block}.cut-survey{max-width:440px;margin:auto}.cut-controls button{display:inline-block;width:49%}.instrument header{gap:6px}.meters,.tuning{gap:8px}}
+ .meters .dig-line{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:5px}.meters progress{appearance:none;border:0;background:#243c46}.meters progress::-webkit-progress-bar{background:#243c46}.meters progress::-webkit-progress-value{background:#eaaa77}.meters progress::-moz-progress-bar{background:#eaaa77}
+ .signal-instrument .tuning{margin-top:14px}.tuning label{position:relative}.tuning small{display:block;color:#d9b6ff;margin-top:5px;font-size:12px}.tuning output{font-variant-numeric:tabular-nums}
+#skipDeparture{position:fixed;right:4vw;bottom:5vh;z-index:30;background:#14232bd9;color:#f0eddf;border:1px solid #77918e;padding:9px 16px;border-radius:3px;cursor:pointer}
+body.departing :is(#hud,#title,#storm,#stats,#waypoint,#objectiveBox,#radarWrap,#keys,#prompt,#toast){visibility:hidden}
 </style>
 <!-- Вид курсора: варианты в js/cursors.js, выбор — ?cursor=<id>, смотреть в tools/cursor-preview.html -->
 <script src="./js/cursors.js"></script>
@@ -508,6 +520,7 @@
 <body>
 
 <div id="app"></div>
+<button id="skipDeparture" type="button" hidden>Пропустить · Esc</button>
 <div id="vignette"></div>
 <div id="fogveil"></div>
 <div id="damage"></div>
@@ -667,25 +680,27 @@
 </div>
 
 <!-- ================= миниигра 3: аномалия ================= -->
-<div id="signal" class="overlay hidden">
-  <div class="card panel">
-    <div class="head">
-      <div>
-        <div class="eyebrow">04 / РЕЗОНАНС</div>
-        <h2>ПОРОГ АНОМАЛИИ</h2>
-      </div>
-    </div>
-    <p>Зелёная волна — ваш ключ, фиолетовая — аномалия. Совместите обе оси и удержите совпадение
-       не меньше двух секунд.</p>
-    <canvas id="sigCanvas"></canvas>
-    <div class="slider"><span>ЧАСТОТА</span><input id="sigFreq" type="range" min="0.6" max="4.6" step="0.01" value="1.2"></div>
-    <div class="slider"><span>ФАЗА</span><input id="sigPhase" type="range" min="0" max="6.28" step="0.01" value="0"></div>
-    <div class="dig-line"><span id="sigStatus">Подстройте частоту и фазу</span>
-      <b id="sigScore">0%</b></div>
-    <div class="bar"><i id="sigBar" style="width:0%"></i></div>
+<section id="excavation" class="overlay hidden">
+  <div class="instrument dig-instrument">
+    <header><div><small>МАНИПУЛЯТОР РОВЕРА</small><h2 id="cutTitle">Раскопки храма</h2></div><button class="close" id="cutExit">К роверу · Esc</button></header>
+    <p>Освободите нишу по центральному или боковому проходу. Выбирайте грунт на схеме. Стрелка показывает нагрузку на плиту.</p>
+    <div class="cut-layout"><div class="cut-survey"><canvas id="cutMap" width="600" height="330" aria-label="Вид на завал сверху под углом"></canvas><div id="cutSlots"></div></div>
+      <div class="cut-controls"><h3 id="cutName"></h3><strong id="cutLoad"></strong><p id="cutHint" aria-live="polite"></p><small id="cutStock"></small>
+        <button id="cutBrace">Установить подпорку</button><button id="cutClear">Расчистить участок</button>
+        <button id="cutDebris">Разобрать обломки</button><button id="cutRemove">Снять подпорку</button>
+      </div></div>
+    <button class="primary" id="cutExtract" hidden>Извлечь фазовый ключ</button>
   </div>
-</div>
-
+</section>
+<section id="signal" class="overlay hidden"><div class="instrument signal-instrument">
+  <header><div><small>ФАЗОВЫЙ КЛЮЧ</small><h2>Резонанс защитной завесы</h2></div><button class="close" id="sigPause">Пауза · Esc</button></header>
+  <div class="scope"><div class="wave-legend"><span>Поле аномалии</span><span>Сигнал ключа</span></div><canvas id="sigCanvas"></canvas></div>
+  <div class="tuning"><label>Частота <output id="freqVal"></output><input id="sigFreq" type="range" min="0.6" max="4.6" step="0.01"><small id="freqGoal"></small></label>
+    <label>Фаза <output id="phaseVal"></output><input id="sigPhase" type="range" min="0" max="6.28" step="0.01"><small id="phaseGoal"></small></label></div>
+  <div class="meters"><div><div class="dig-line">Открытие завесы <b id="sigScore">0%</b></div><div class="bar"><i id="sigBar" style="width:0"></i></div></div>
+    <div><div class="dig-line"><label for="sigThermal">Нагрев ключа</label><b id="sigHeat">0%</b></div><progress id="sigThermal" max="100" value="0"></progress></div></div>
+  <p id="sigStatus"></p><button id="sigTransmit" class="primary">Удерживать для передачи · пробел</button>
+</div></section>
 <!-- ================= карта ================= -->
 <div id="map" class="overlay hidden">
   <div class="card panel" style="width:min(760px,calc(100vw - 48px))">
@@ -767,11 +782,11 @@
     <div id="endingChoices">
       <button class="choice" id="endingFree">
         <b>ОТКЛЮЧИТЬ ШПИЛЬ</b>
-        <span>Планета увидит звёзды. Экспедиция останется внизу навсегда</span>
+        <span>Планета увидит звёзды. Вы останетесь внизу навсегда. Человечество получит генетический архив.</span>
       </button>
       <button class="choice" id="endingLeave">
         <b>ВЕРНУТЬСЯ НА «ОДИССЕЙ»</b>
-        <span>Забрать артефакты. Буря останется, правда — тоже</span>
+        <span>Забрать артефакты. Капсулы останутся под бурей.</span>
       </button>
     </div>
   </div>
@@ -782,16 +797,12 @@
   <div class="card panel">
     <h1>АВАРИС</h1>
     <div class="sect">ПО ТУ СТОРОНУ БУРИ · 2132</div>
-    <p>Человечество вышло за пределы Солнечной системы. Разведывательный корабль «Одиссей»
-       вышел на орбиту Авариса: сигнал этой планеты повторяет всплески, которые ловили ещё
-       примитивные антенны Земли.</p>
+    <p>Человечество давно вышло за пределы Солнечной системы. Разведывательный корабль «Одиссей» вышел на орбиту Авариса. Сигнал от этой планеты мы слышим до сих пор. Те же волны, что ловили ещё примитивные антенны Земли.</p>
     <p>На поверхность спустились трое — археолог Мира Соколова, физик Лев Орлов
        и бортинженер Нина Кравцова. Остальной экипаж ждёт на орбите. Но планету накрывает
        <b>Великая буря</b> — и, по всем расчётам, именно она когда-то уничтожила здесь жизнь.</p>
-    <p>Язык аварисцев не подписан. Значения знаков придётся вывести: на планете остались
-       механизмы с двумя состояниями — врата, очаг и противовес. Слова с них станут ключами
-       к переводчику, а три расшифрованных текста скажут, где копать.</p>
-    <p>Буря не ждёт. Но в минииграх и диалогах её отсчёт останавливается — думать можно спокойно.</p>
+    <p>Язык аварисцев не известен. Значения знаков придётся разузнать: на планете остались механизмы с двумя состояниями — врата, очаг и противовес. Слова с них станут ключами к ИИ-расшифровщику: он прочтёт три манускрипта, закопанные в пустыне.</p>
+    <p>Буря не ждёт. Но в мини-играх и диалогах её отсчёт останавливается. Думать можно спокойно.</p>
     <ul>
       <li><b>W / S</b> газ и назад</li>
       <li><b>A / D</b> поворот</li>
@@ -799,7 +810,7 @@
       <li><b>Space</b> тормоз</li>
       <li><b>E</b> действие</li>
       <li><b>F</b> копать шурф <span style="opacity:.6">· до десяти за экспедицию, тратит энергию</span></li>
-      <li><b>M</b> карта · <b>J</b> журнал</li>
+      <li><b>M</b> карта · <b>I</b> переводчик · <b>J</b> журнал</li>
       <li><b>Esc</b> пауза</li>
       <li><b>R</b> поставить ровер</li>
     </ul>
