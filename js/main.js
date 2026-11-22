@@ -2098,6 +2098,34 @@ function itemThumb(kind) {
   return url;
 }
 
+/** Подсветка знаков на пластинах.
+    'note'  — у знака есть заметка в журнале (по умолчанию);
+    'seen'  — знак уже встречался на механизме;
+    'picks' — знаку уже вписано значение (самый строгий вариант). */
+const TRANSLATOR_HIGHLIGHT = 'note';
+
+function plateGlyphClass(glyph, has, bad) {
+  const key = STORY.KEYS.find((k) => k.glyph === glyph);
+  const noted = key ? !!String(state.signNotes[key.id] || '').trim() : false;
+  const seen = key ? state.keys.includes(key.id) : false;
+  const mark = TRANSLATOR_HIGHLIGHT === 'note' ? noted
+    : TRANSLATOR_HIGHLIGHT === 'seen' ? seen : false;
+  const lit = TRANSLATOR_HIGHLIGHT === 'picks' ? has : (mark || has);
+  return `tr-g${lit ? ' familiar' : ' unseen'}${has ? ' has' : ''}${bad ? ' bad' : ''}`;
+}
+
+/** Обновить подсветку прямо в разметке: журнал при этом не перерисовывается,
+    и поле заметки не теряет фокус при вводе */
+function paintPlateMarks() {
+  document.querySelectorAll('#trTexts .tr-g').forEach((el) => {
+    const glyph = el.dataset.glyph;
+    const has = (state.picks || []).some((p) => p.glyph === glyph);
+    const bad = !!(tr.bad && tr.bad.has(glyph));
+    const cls = plateGlyphClass(glyph, has, bad);
+    if (el.className !== cls) el.className = cls;
+  });
+}
+
 /** Перерисовать пластины манускриптов и строку журнала под ними */
 function renderTranslator() {
   // предметы: фазовый ключ и находки — тоже в инвентаре
@@ -2120,7 +2148,6 @@ function renderTranslator() {
 
   const found = state.scrolls;
   const pickedGlyphs = new Set((state.picks || []).map((p) => p.glyph));
-  const TRANSLATOR_HIGHLIGHT = 'seen';   // 'seen' | 'picks'
   const DMG = ['a', 'b', 'c'];
   $('trTexts').innerHTML = STORY.SCROLLS.map((sc, idx) => {
     const text = STORY.TEXTS.find((x) => x.id === sc.textId);
@@ -2131,13 +2158,7 @@ function renderTranslator() {
       ? `<div class="tr-plate dmg-${DMG[idx % 3]}"><div class="tr-plate__grid">${text.glyphs.map((g, i) => {
         const has = pickedGlyphs.has(g);
         const bad = tr.bad && tr.bad.has(g);
-        // Подсветка: 'seen' — знаки, которые игрок уже видел на механизмах
-        // (по умолчанию, как у коллег). 'picks' — только уже назначенные
-        // значения: строгий вариант, когда игрок сам ищет знак на пластине.
-        const familiar = TRANSLATOR_HIGHLIGHT === 'seen'
-          && STORY.KEYS.some((k) => k.glyph === g && state.keys.includes(k.id));
-        const deep = TRANSLATOR_HIGHLIGHT === 'picks' ? has : familiar || has;
-        const cls = `tr-g${deep ? ' familiar' : ' unseen'}${has ? ' has' : ''}${bad ? ' bad' : ''}`;
+        const cls = plateGlyphClass(g, has, bad);
         return `<span class="${cls}" data-glyph="${g}" data-slot="${sc.id}-${i}">${g}</span>`;
       }).join('')}</div></div>`
       : `<div class="tr-plate tr-plate--empty"></div>`;
@@ -2178,6 +2199,7 @@ function paintJournal() {
       const v = inp.value.slice(0, 120);
       if (v.trim()) state.signNotes[id] = v;
       else delete state.signNotes[id];
+      paintPlateMarks();
       scheduleSignSave();
     });
   });
@@ -2751,6 +2773,10 @@ function openJournal() {
     .join('');
   $('journal').classList.remove('hidden');
 }
+
+/* Миниигра «сигнал»: её состояние нужно и в паузе, и в обработчиках мыши */
+let resumeSignal = false;
+let signalPointer = false;
 
 /* ================================================================ ПАУЗА */
 function openPause(auto = false) {
