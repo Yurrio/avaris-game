@@ -803,7 +803,6 @@ const STORY_TEXT = {
   digDone: "Готово. Слои расходятся, словно лепестки Сиренума. Ни следа коррозии.",
   artifact: "Фазовый ключ. Его слои — не украшение: это регуляторы энергии. Он откликается на импульсы к востоку от храма — к порогу резонанса.",
   signalDone: "Резонанс достигнут. Завеса расходится — по ту сторону стоят руины.",
-  ahola: "Ахола. Древний буфер: активируешь его — и буря отступает. Каждый работает лишь единожды.",
   aholaLocked: "Ахола молчит: без следующего этапа расследования мы не знаем, как её активировать.",
   tabletLocked: (n) => `Переводчик не знает слов: нужно ещё ${n}.`,
   core: 'Мы у самых развалин. Шпиль уходит в небо и держит завесу.',
@@ -830,6 +829,14 @@ function saveGame(note = false) {
   } catch {
     toast('Сохранение недоступно: браузер запрещает localStorage');
   }
+}
+
+/* Объяснения, которые показываются ровно один раз за экспедицию:
+   ахола при первом проезде мимо, жёлтый кристалл при первом сборе. */
+function hintSeen(id) { return (state.hints || []).includes(id); }
+function markHint(id) {
+  if (!Array.isArray(state.hints)) state.hints = [];
+  if (!state.hints.includes(id)) { state.hints.push(id); saveGame(); }
 }
 
 function readSave() {
@@ -1590,7 +1597,10 @@ function tryInteract() {
       audio.ahola();
       audio.spark();
       const add = 60;
-      say([{ who: 'НИНА', text: STORY_TEXT.ahola }], 'explore');
+      if (!hintSeen('ahola')) {
+        markHint('ahola');
+        note('АХОЛА', 'Древний буфер. Разряд отодвигает бурю — но каждая ахола работает лишь один раз.');
+      }
       toast(`Ахола разряжена · +${add} с`);
       paintProgress();
       saveGame();
@@ -1686,10 +1696,24 @@ function say(lines, after = 'explore') {
   audio.tone(440, 0.1, 'sine', 0.06);
 }
 
+/** Запись из мира: та же рамка, что у диалога, но без говорящего.
+    Экипаж с игроком не разговаривает — правила и находки приходят записями. */
+function note(title, text, after = 'explore') {
+  dlg.queue = [{ note: title, text }];
+  dlg.done = after;
+  dlg.i = 0;
+  mode = 'dialog';
+  $('dialog').classList.remove('hidden');
+  renderDialog();
+  audio.tone(660, 0.12, 'sine', 0.05);
+}
+
 function renderDialog() {
   const line = dlg.queue[dlg.i];
   if (!line) return;
-  $('dlgName').textContent = line.who;
+  const isNote = !!line.note;
+  $('dialog').classList.toggle('note', isNote);
+  $('dlgName').textContent = isNote ? `ЗАПИСЬ · ${line.note}` : line.who;
   $('dlgText').textContent = line.text;
   $('dlgStep').textContent = `${dlg.i + 1} / ${dlg.queue.length} · пробел`;
 }
@@ -1816,11 +1840,8 @@ function toggleInspect() {
     saveGame();
     // все механизмы изучены — прямо говорим, что теперь можно делать
     if (STORY.keysComplete(state) && !state.decoded) {
-      say([
-        { who: 'МИРА', text: art.text },
-        { who: 'ЛЕВ', text: 'Все три механизма изучены, шесть знаков в журнале. Теперь на пластинах можно вписывать значения — и отправить их ИИ. Откройте журнал (I).' },
-        { who: 'НИНА', text: 'Кнопка отправки появится в окне переводчика вместе с последним расшифрованным знаком.' },
-      ], () => {
+      note('ПЛАСТИНЫ', 'Все три механизма изучены, шесть знаков в журнале. Значения теперь можно '
+        + 'вписывать прямо на пластинах и отправлять их ИИ.', () => {
         paintInspectPrompt();
         toast('Пластины открыты · I — вписать значения и отправить ИИ-расшифровщику.');
       });
@@ -1828,7 +1849,7 @@ function toggleInspect() {
     }
     const firstTime = state.solved.length === 1;
     const levLine = firstTime
-      ? 'Записал оба знака. Открой журнал (I) и впиши своими словами, что они означают — потом сверим с пластинами.'
+      ? 'Записал оба знака. Пусть каждый впишет свою догадку о смысле — потом сверим с пластинами.'
       : `Осталось механизмов: ${3 - state.solved.length}. Чем больше знаков, тем легче будет прочесть пластины.`;
     say([{ who:'НИНА',text:art.text },{who:'ЛЕВ',text:levLine}], () => paintInspectPrompt());
     return;
@@ -1903,10 +1924,10 @@ function submitLesson() {
     say([{
       who: 'ЛЕВ',
       text: state.solved.length === 1
-        ? 'Записал оба знака. Открой журнал (I) и впиши своими словами, что они означают — потом сверим с пластинами.'
+        ? 'Записал оба знака. Пусть каждый впишет свою догадку о смысле — потом сверим с пластинами.'
         : left > 0
           ? `Записал. Осталось механизмов: ${left}. Чем больше знаков, тем легче будет прочесть плиту.`
-          : 'Шесть знаков. Теперь на пластинах можно вписывать значения и отправить их ИИ — откройте I.',
+          : 'Шесть знаков. Теперь значения на пластинах можно вписать и отдать ИИ.',
     }], 'explore');
     if (!left) toast('Пластины открыты · I — вписать значения и отправить ИИ-расшифровщику.');
   }, 1500);
@@ -3450,6 +3471,19 @@ function frame(now) {
     if (rover.bump > 0.01) { audio.bumpStone(rover.bump); rover.bump = 0; }
     if (rover.impact > 0.01) { audio.impact(rover.impact); rover.impact = 0; }
 
+    // первая ахола на пути: что это такое и как этим пользоваться
+    if (!hintSeen('ahola')) {
+      for (const ah of P.aholas) {
+        const b = world.beacons[ah.beacon];
+        if (b && rover.pos.distanceTo(b.pos) < 26) {
+          markHint('ahola');
+          note('АХОЛА', 'Древний буфер. Разряд отодвигает бурю — но каждая ахола работает лишь один раз. '
+            + 'Первая ступень открывается после прочтения письмён, вторая — когда в руках фазовый ключ, третья — за снятой завесой.');
+          break;
+        }
+      }
+    }
+
     for (const s of world.shards) {
       if (s.collected) continue;
       if (rover.pos.distanceTo(s.group.position) < 5.2) {
@@ -3458,6 +3492,16 @@ function frame(now) {
         rover.heal(5);
         audio.pickup();
         toast('+6 с бури · осколок памяти');
+        if (!hintSeen('shard')) {
+          // сначала пусть прозвучит тост и подберётся кристалл, потом объясняем
+          setTimeout(() => {
+            if (mode === 'explore' && !hintSeen('shard')) {
+              markHint('shard');
+              note('ОСКОЛОК ПАМЯТИ', 'Жёлтый кристалл. Держит время: каждый отодвигает бурю на шесть секунд '
+                + 'и затягивает трещины в обшивке.');
+            }
+          }, 900);
+        }
       }
     }
 
@@ -3592,7 +3636,7 @@ function finishDeparture(){
   document.body.classList.remove('departing');
   $('skipDeparture').hidden=true;
   say([{who:'МИРА',text:STORY_TEXT.arrival},
-    {who:'НИНА',text:'Начнём со схронов. Веди на сигнал радара, у самой пластины нажми F.'}],'explore');
+    {who:'НИНА',text:'Начнём со схронов. Веди на сигнал радара.'}],'explore');
   saveGame();
 }
 
@@ -3749,6 +3793,8 @@ window.__avaris = {
   begin, saveGame, readSave,
   // финальные кадры: посмотреть концовку без прохождения
   playEnding(kind = 'free') { startEpilogue(kind); return mode; },
+  // показать внутриигровую запись (для проверки вёрстки и текстов)
+  note(title, text) { note(title, text); return mode; },
   skipEnding: skipEpilogue,
   get epilogue() { return epilogue; },
   handDig, handGrow,

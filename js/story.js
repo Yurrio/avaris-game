@@ -369,6 +369,8 @@ export function freshState() {
     // личные записи игрока к знакам: что он сам вписал в электронный журнал
     signNotes: {},
     signHintSeen: false,
+    // однажды показанные объяснения (ахола, жёлтые кристаллы и т.п.)
+    hints: [],
     // найденные манускрипты и отправленные на расшифровку значения
     scrolls: [],
     translit: {},
@@ -414,6 +416,9 @@ export function normalizeSave(raw) {
   s.keys = [...new Set((Array.isArray(raw.keys) ? raw.keys : []).filter((v) => keyIds.has(v)))];
 
   // записи игрока к знакам: любая строка, ни на что не влияет
+  s.hints = [...new Set((Array.isArray(raw.hints) ? raw.hints : [])
+    .filter((v) => typeof v === 'string' && v.length < 40))];
+
   s.signNotes = {};
   if (raw.signNotes && typeof raw.signNotes === 'object') {
     for (const [id, v] of Object.entries(raw.signNotes)) {
