@@ -795,10 +795,9 @@ const MUSIC = {
 
 /* ================================================================ ТЕКСТЫ */
 const STORY_TEXT = {
-  intro:
-    '2132 год. Аварис — планета, чей сигнал повторяет всплески, которые ловили ещё ' +
-    'примитивные антенны Земли. На поверхность вышли трое: археолог Мира, физик Лев ' +
-    'и бортинженер Нина. «Одиссей» ждёт на орбите. И где-то здесь идёт Великая буря.',
+  // первая реплика в игре: заставка уже рассказала, кто мы и зачем, — здесь
+  // только то, чего в ней нет, иначе получается два раза один и тот же абзац
+  arrival: 'Вышли. И тишина такая, будто планету кто-то выключил.',
   fog: "Стоп! Дальше буря слишком плотная — она царапает обшивку. Пять метров, не больше.",
   repair: "Обшивка не выдержала. Я заварила пробоины — но больше так не подставляйся.",
   digDone: "Готово. Слои расходятся, словно лепестки Сиренума. Ни следа коррозии.",
@@ -1767,14 +1766,12 @@ async function enterInspectCut(site, art) {
 function paintInspectPrompt() {
   if (mode !== 'inspect') return;
   const art = STORY.artifactById(inspect.site.kind);
-  const now = inspect.site.on ? art.on : art.off;
-  const k = STORY.KEYS.find((x) => x.id === now);
-  const left = STORY.artifactReady(state, art.id) ? '' : ' · нужны оба состояния';
-  // слово-значение не подсказываем: его игрок выводит сам
-  ui.prompt.innerHTML = '<b>E</b> — переключить'
-    + '<br><span>I — журнал · удержать E или Esc — отойти</span>';
-  ui.prompt.classList.add('on');  const sub = ui.sub;
-  if (sub) sub.textContent = `${art.name}: знак ${k.glyph}${left}`;
+  // слово-значение не подсказываем: его игрок выводит сам.
+  // Подсказка механизма говорит ровно то, что сделает E: откроет/закроет,
+  // зажжёт/погасит, поднимет/опустит — без общих слов «переключить состояние».
+  ui.prompt.innerHTML = 'Нажмите <b>E</b> для активации механизма'
+    + `<br><span>${art.hint}</span>`;
+  ui.prompt.classList.add('on');
 }
 
 function exitInspect() {
@@ -3594,7 +3591,7 @@ function finishDeparture(){
   audio.setEngine(0,false);
   document.body.classList.remove('departing');
   $('skipDeparture').hidden=true;
-  say([{who:'МИРА',text:STORY_TEXT.intro},
+  say([{who:'МИРА',text:STORY_TEXT.arrival},
     {who:'НИНА',text:'Начнём со схронов. Веди на сигнал радара, у самой пластины нажми F.'}],'explore');
   saveGame();
 }
