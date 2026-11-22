@@ -1414,6 +1414,12 @@ function handDig() {
     rover.dust.emit(new THREE.Vector3(px, meshHeightAt(px, pz) + 0.5, pz), 2, 4.2, 'clod');
   }
 
+  digOutcome(res);
+}
+
+
+/** Исход копания: находка (с репликой) или «пусто» — одинаково в любом месте */
+function digOutcome(res) {
   if (res.trinket) {
     const t = res.trinket;
     setTimeout(() => {
@@ -2363,12 +2369,20 @@ function moundDig() {
   // Без письмен непонятно, где именно под насыпью вход: снимаем только
   // верхний слой грунта и ничего не находим
   if (!state.decoded) {
+    // копаем насыпь как обычный шурф: тот же расход, тот же исход
+    if (STORY.handDigLeft(state) <= 0) {
+      toast(`Шурфы кончились: на экспедицию их ${STORY.HAND_DIGS_MAX}`);
+      audio.tone(170, 0.22, 'sine', 0.06, 120);
+      return;
+    }
     rover.vel.x = 0; rover.vel.z = 0; rover.speed = 0;
     rover.energy = Math.max(0, rover.energy - HAND_DIG_COST);
     const ang = Math.atan2(TEMPLE.z - rover.pos.z, TEMPLE.x - rover.pos.x)
       + (Math.random() - 0.5) * 1.6;
     const x = rover.pos.x + Math.cos(ang) * 2.4;
     const z = rover.pos.z + Math.sin(ang) * 2.4;
+    const res = STORY.digAnywhere(state, x, z);
+    if (!res.ok) return;
     const e = addHandDig(x, z);
     handGrow.push({ e, t: 0 });
     rover.shake = Math.max(rover.shake, 0.35);
@@ -2379,9 +2393,9 @@ function moundDig() {
       const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
       rover.dust.emit(new THREE.Vector3(px, meshHeightAt(px, pz) + 0.5, pz), 2, 4.2, 'clod');
     }
-    toast('Сняли только верхний слой: без письмен не понять, где под насыпью вход');
     paintProgress();
     saveGame();
+    digOutcome(res);
     return;
   }
   rover.vel.x = 0; rover.vel.z = 0; rover.speed = 0;
