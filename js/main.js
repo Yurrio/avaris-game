@@ -741,6 +741,17 @@ const MUSIC = {
     this.target = 0;
   },
 
+  /** Мгновенная тишина для меню: трек встаёт на паузу с того же места.
+      Вернулись в игру — update() плавно поднимет его обратно. */
+  suspend() {
+    this.target = 0;
+    this.level = 0;
+    const el = this.el;
+    if (!el) return;
+    el.volume = 0;
+    if (!el.paused) el.pause();
+  },
+
   /**
    * Музыка звучит РОВНО столько, сколько идёт таймер бури: пока время капает,
    * трек играет; в диалогах, минииграх, на карте и на паузе время стоит —
@@ -2916,6 +2927,8 @@ function openPause(auto = false) {
   if (['ending', 'epilogue', 'menu', 'defeat'].includes(mode)) return;
   resumeSignal=mode==='signal';
   if(resumeSignal) { keys.Space=false; signalPointer=false; $('signal').classList.add('hidden'); }
+  // в меню музыка молчит: трек ставится на паузу с того же места
+  MUSIC.suspend();
   mode = 'pause';
   $('cursorPick').classList.add('hidden');
   $('pause').classList.remove('hidden');
@@ -3350,6 +3363,9 @@ function frame(now) {
   const dt = Math.min(0.06, raw);
   elapsed += dt;
   const t = elapsed;
+  // музыка живёт во всех режимах: на паузе и в наложениях её уровень уходит
+  // в ноль (и трек встаёт на паузу), в езде — поднимается обратно
+  MUSIC.update(dt);
   if (mode === 'epilogue') {
     // кадр живёт сам по себе: сцена идёт, камеру ведёт таймлайн,
     // HUD спрятан, паузы и ввод игрока в кадр не попадают
@@ -3419,7 +3435,6 @@ function frame(now) {
   updateSunShadow();
   adaptQuality(raw);
   updatePhaseCore(dt);
-  MUSIC.update(dt);
   if (mode !== 'explore') { audio.setEngine(0, false); audio.setRoll(0); }
 
   if (mode === 'explore') {
