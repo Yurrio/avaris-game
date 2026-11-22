@@ -1806,12 +1806,16 @@ function toggleInspect() {
   if (added) {
     paintProgress();
     saveGame();
-    // все механизмы изучены — прямо говорим, куда идти дальше
+    // все механизмы изучены — прямо говорим, что теперь можно делать
     if (STORY.keysComplete(state) && !state.decoded) {
       say([
         { who: 'МИРА', text: art.text },
-        { who: 'ЛЕВ', text: "Шесть знаков. Пластины промедления не терпят — поехали, попробуем прочитать три текста." },
-      ], () => paintInspectPrompt());
+        { who: 'ЛЕВ', text: 'Все три механизма изучены, шесть знаков в журнале. Теперь на пластинах можно вписывать значения — и отправить их ИИ. Откройте журнал (I).' },
+        { who: 'НИНА', text: 'Кнопка отправки появится в окне переводчика вместе с последним знаком. До этого пластины не нажимаются — нечего и пытаться.' },
+      ], () => {
+        paintInspectPrompt();
+        toast('Пластины открыты · I — вписать значения и отправить ИИ');
+      });
       return;
     }
     const firstTime = state.solved.length === 1;
@@ -1894,8 +1898,9 @@ function submitLesson() {
         ? 'Записал оба знака. Открой журнал (I) и впиши своими словами, что они означают — потом сверим с пластинами.'
         : left > 0
           ? `Записал. Осталось механизмов: ${left}. Чем больше знаков, тем легче будет прочесть плиту.`
-          : 'Шесть знаков. Плита у насмешек не терпит — поехали, попробуем прочитать три текста.',
+          : 'Шесть знаков. Теперь на пластинах можно вписывать значения и отправить их ИИ — откройте I.',
     }], 'explore');
+    if (!left) toast('Пластины открыты · I — вписать значения и отправить ИИ');
   }, 1500);
 }
 
@@ -1939,7 +1944,11 @@ function openTranslate() {
     paintTrStatus('Эти надписи уже переведены — они лежат в журнале (J).');
     return;
   }
-  paintTrStatus('Справа — ваши заметки о знаках. На пластине нажмите знак и впишите значение — это уже ответ для ИИ.');
+  // подсказку ставит renderTranslator: пока механизмы не изучены, там висит
+  // объяснение замка, и перебивать его нельзя
+  if (platesUnlocked()) {
+    paintTrStatus('Справа — ваши заметки о знаках. На пластине нажмите знак и впишите значение — это уже ответ для ИИ.');
+  }
 }
 
 /** Три надписи с переводом — то, что игрок читает после расшифровки.
@@ -2147,6 +2156,14 @@ const NOTES_MODE = (() => {
 // версия пластин видна и в разметке: пригодится и для отладки, и для CSS
 document.body.dataset.notes = NOTES_MODE;
 
+/* Пластины открываются только после того, как изучены все механизмы:
+   три артефакта × два состояния = шесть знаков в журнале. До этого знаки
+   на пластинах видны, но нажать их нельзя, и кнопки отправки в окне нет —
+   своей возможности вписать значение просто не существует. */
+function platesUnlocked() {
+  return STORY.keysComplete(state);
+}
+
 function plateGlyphClass(glyph, has, bad) {
   if (NOTES_MODE === 'off') return `tr-g${has ? ' has' : ''}${bad ? ' bad' : ''}`;
   const key = STORY.KEYS.find((k) => k.glyph === glyph);
@@ -2161,11 +2178,12 @@ function plateGlyphClass(glyph, has, bad) {
 /** Обновить подсветку прямо в разметке: журнал при этом не перерисовывается,
     и поле заметки не теряет фокус при вводе */
 function paintPlateMarks() {
+  const unlocked = platesUnlocked();
   document.querySelectorAll('#trTexts .tr-g').forEach((el) => {
     const glyph = el.dataset.glyph;
     const has = (state.picks || []).some((p) => p.glyph === glyph);
     const bad = !!(tr.bad && tr.bad.has(glyph));
-    const cls = plateGlyphClass(glyph, has, bad);
+    const cls = `${plateGlyphClass(glyph, has, bad)}${unlocked ? '' : ' locked'}`;
     if (el.className !== cls) el.className = cls;
   });
 }
@@ -2193,6 +2211,7 @@ function renderTranslator() {
   const found = state.scrolls;
   const pickedGlyphs = new Set((state.picks || []).map((p) => p.glyph));
   const DMG = ['a', 'b', 'c'];
+  const unlocked = platesUnlocked();
   $('trTexts').innerHTML = STORY.SCROLLS.map((sc, idx) => {
     const text = STORY.TEXTS.find((x) => x.id === sc.textId);
     const known = found.includes(sc.id);
@@ -2202,8 +2221,8 @@ function renderTranslator() {
       ? `<div class="tr-plate dmg-${DMG[idx % 3]}"><div class="tr-plate__grid">${text.glyphs.map((g, i) => {
         const has = pickedGlyphs.has(g);
         const bad = tr.bad && tr.bad.has(g);
-        const cls = plateGlyphClass(g, has, bad);
-        return `<span class="${cls}" data-glyph="${g}" data-slot="${sc.id}-${i}">${g}</span>`;
+        const cls = `${plateGlyphClass(g, has, bad)}${unlocked ? '' : ' locked'}`;
+        return `<span class="${cls}" data-glyph="${g}" data-slot="${sc.id}-${i}"${unlocked ? '' : ' aria-disabled="true"'}>${g}</span>`;
       }).join('')}</div></div>`
       : `<h4>&nbsp;</h4><div class="tr-plate tr-plate--empty"></div>`;
     return `<article class="tr-text"><h4>${sc.title}</h4>${body}</article>`;
@@ -2212,15 +2231,29 @@ function renderTranslator() {
   // ---- ЖУРНАЛ: просто шпаргалка со знаками, ни на что не влияет
   paintJournal();
 
-  // клик по любому знаку на пластине — окошко для своего перевода
-  $('trTexts').querySelectorAll('.tr-g').forEach((g) => {
-    g.addEventListener('click', () => openSignPop(g.dataset.glyph, g.getBoundingClientRect()));
-  });
+  // клик по любому знаку на пластине — окошко для своего перевода.
+  // Пока механизмы не изучены, обработчиков нет вовсе: нажимать нечего.
+  if (unlocked) {
+    $('trTexts').querySelectorAll('.tr-g').forEach((g) => {
+      g.addEventListener('click', () => openSignPop(g.dataset.glyph, g.getBoundingClientRect()));
+    });
+  }
 
   const n = pickedGlyphs.size;
-  $('trStatus').classList.toggle('bad', false);
-  if (state.decoded) $('trSubmit').disabled = false;
-  else $('trSubmit').disabled = n < STORY.PICK_MAX || !STORY.scrollsComplete(state);
+  const submit = $('trSubmit');
+  const status = $('trStatus');
+  status.classList.toggle('bad', false);
+  status.classList.toggle('locked', !unlocked && !state.decoded);
+  // кнопки отправки до изучения механизмов просто нет в окне
+  submit.hidden = !unlocked && !state.decoded;
+  if (state.decoded) submit.disabled = false;
+  else submit.disabled = n < STORY.PICK_MAX || !STORY.scrollsComplete(state);
+
+  if (!unlocked) {
+    status.textContent = `Пластины пока не читаются · механизмы ${state.solved.length} / ${STORY.ARTIFACTS.length}, `
+      + `знаки ${state.keys.length} / ${STORY.KEYS.length}. Значения на пластины можно будет вписать, `
+      + 'когда вы изучите все три механизма — оба состояния каждого.';
+  }
 }
 
 /** Журнал — только наши заметки: знак и поле, куда пишем своё наблюдение.
@@ -2251,6 +2284,7 @@ function paintJournal() {
 
 /** Убрать знак из журнала — можно выбрать на его место другой */
 function deletePick(glyph) {
+  if (!platesUnlocked()) return;
   const i = state.picks.findIndex((p) => p.glyph === glyph);
   if (i < 0) return;
   state.picks.splice(i, 1);
@@ -2264,6 +2298,11 @@ function deletePick(glyph) {
 
 /** Окошко значения у выбранного знака. Никогда не накрывает журнал. */
 function openSignPop(glyph, rect) {
+  if (!platesUnlocked()) {
+    paintTrStatus('Сначала изучите все три механизма — тогда знаки на пластинах можно будет подписывать.', true);
+    audio.deny();
+    return;
+  }
   const pop = $('trPop');
   const idx = state.picks.findIndex((p) => p.glyph === glyph);
   const picked = idx >= 0;
@@ -2301,6 +2340,12 @@ function closeSignPop() {
 
 /** Записать значение из окошка: пустое поле = убрать знак из журнала */
 function saveSignPop() {
+  if (!platesUnlocked()) {
+    closeSignPop();
+    paintTrStatus('Сначала изучите все три механизма — тогда знаки на пластинах можно будет подписывать.', true);
+    audio.deny();
+    return;
+  }
   const pop = $('trPop');
   const glyph = pop.dataset.glyph;
   if (!glyph) { closeSignPop(); return; }
@@ -2328,10 +2373,17 @@ function paintTrStatus(text, bad) {
   const el = $('trStatus');
   el.textContent = text;
   el.classList.toggle('bad', !!bad);
+  el.classList.remove('locked');
 }
 
 function submitTranslate() {
   if (state.decoded) { renderDecodedTexts(); return; }
+  if (!platesUnlocked()) {
+    paintTrStatus(`ИИ ждёт шесть знаков · изучено механизмов ${state.solved.length} / ${STORY.ARTIFACTS.length}. `
+      + 'Отправка станет доступна, когда будут изучены все три механизма.', true);
+    audio.deny();
+    return;
+  }
   const picks = (state.picks || []).filter((p) => p && p.glyph);
   if (picks.length < STORY.PICK_MAX) {
     paintTrStatus(`Переведено ${picks.length} из ${STORY.PICK_MAX} знаков — нажмите на знак и впишите перевод.`, true);

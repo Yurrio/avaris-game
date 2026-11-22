@@ -370,6 +370,10 @@
   .sig-burn{color:#ffb45a}
   .sig-dark{color:#7d93a1}
   #trStatus{font-size:10.5px;letter-spacing:2px;color:#8fb8cb;margin:14px 0 16px;min-height:1.4em}
+  /* Пластины до изучения всех механизмов: знаки видны, но не нажимаются */
+  #trStatus.locked{color:#ffd27a}
+  .tr-g.locked{pointer-events:none;cursor:default;opacity:.72}
+  .tr-g.locked:hover{color:inherit;text-shadow:0 1px 1px rgba(0,0,0,.9),0 0 8px rgba(120,200,225,.16)}
 
 
   #sigCanvas{width:100%;height:150px;display:block;border-radius:4px;
