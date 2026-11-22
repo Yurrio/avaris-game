@@ -1969,7 +1969,7 @@ function renderDecodedTexts() {
   // иначе сверять перевод с записями приходится по памяти
   $('trTexts').innerHTML = STORY.TEXTS.map((t) => `
     <article class="tr-text tr-decoded">
-      <h4>${t.title}${t.genre ? `<span class="tr-genre"> · ${t.genre}</span>` : ''}</h4>
+      <h4>${t.title}</h4>
       <div class="tr-glyphs">${t.glyphs.map((g) => `<span>${g}</span>`).join('')}</div>
       <p class="tr-term"><span class="tr-text-node"></span><span class="tr-caret"></span></p>
     </article>`).join('');
