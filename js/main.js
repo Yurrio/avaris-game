@@ -1496,6 +1496,10 @@ function nearestInteract() {
     if (!state.visitedVault) consider('vault',vault,vault.scanPos || vault.pos,vault.model?5:20);
     else consider('core',P.core,P.core,11);
   }
+  // фазовый ключ висит над алтарём, пока его не сняли
+  if (state.excavation && state.excavation.recorded && !state.artifact && world.summitKey) {
+    consider('key', world.summitKey, { x: TEMPLE.x, z: TEMPLE.z }, 13);
+  }
   return best;
 }
 
@@ -1528,6 +1532,7 @@ function updatePrompt() {
       break;
     }
     case 'vault': text='<b>E</b> — осмотреть криокапсулы'; break;
+    case 'key': text = '<b>E</b> — снять фазовый ключ с алтаря'; break;
     case 'core': text = '<b>E</b> — войти в Сердце бури'; break;
     default: break;
   }
@@ -1580,6 +1585,14 @@ function tryInteract() {
     saveGame(); say([{"who": "МИРА", "text": "Огни горят. Хранилище питается от той самой бури — поэтому и держится до сих пор."}, {"who": "ЛЕВ", "text": "Криокапсулы. Сотни. И они разные — смотри: эти высокие, с гребнем, а эти ниже и шире. Совсем другие пропорции."}, {"who": "МИРА", "text": "Это не один народ — несколько видов. Они собирали тех, кого могли спасти. И все капсулы повёрнуты к городу, как будто ждут, что кто-то откроет двери."}, {"who": "ЛЕВ", "text": "Сами капсулы мертвы, но записи внутри целы. Если передать их ретранслятору до отключения, потом по ним смогут восстановить всё, что здесь спит. Но хранилище исчезнет."}, {"who": "МИРА", "text": "Значит, они ждали не нас. Они ждали того, кто решится их разбудить."}],'explore'); return;
   }
   if (t.kind === 'core') finalDialogue();
+  if (t.kind === 'key') {
+    if (!STORY.complete(state, 'artifact')) return;
+    if (world.takePhaseCore) world.takePhaseCore();
+    audio.unearth();
+    paintProgress();
+    saveGame();
+    say([{ who: 'ЛЕВ', text: STORY_TEXT.artifact }], () => openArtifact());
+  }
 }
 
 /** Раскопать схрон: одного верного захода достаточно */
@@ -2360,7 +2373,7 @@ const moundAnim = { active: false, from: 0, to: 0, t: 0 };
 const MOUND_STEP = 1 / 3;   // один заход снимает треть насыпи
 
 function onMound() {
-  if (state.artifact && state.excavation && state.excavation.recorded) return false;
+  if (state.excavation && state.excavation.recorded) return false;
   if (state.artifact) return false;
   return Math.hypot(rover.pos.x - TEMPLE.x, rover.pos.z - TEMPLE.z) < MOUND_R - 3;
 }
@@ -2504,30 +2517,19 @@ function updateMound(dt) {
   if (moundAnim.to >= 1) {
     setDig(1);
     world.repaintDig();
-    const taken = STORY.complete(state, 'artifact');
     world.revealPhaseCore();
     paintProgress();
     saveGame();
     // чистый раскоп или с обвалами — показываем сразу, а не только в журнале
     const digReport = templeReport(state.excavation);
     if (digReport) setTimeout(() => toast(digReport), 1500);
-    if (taken) {
-      setTimeout(() => {
-        say([
-          { who: 'МИРА', text: STORY_TEXT.digDone },
-          { who: 'ЛЕВ', text: STORY_TEXT.artifact },
-        ], () => openArtifact());
-      }, 500);
-    } else {
-      // письмена не разобраны — ключ виден, но снять его пока нельзя
-      toast('Насыпь вскрыта · ключ в нише, но без расшифровки его не снять');
-      setTimeout(() => {
-        say([
-          { who: 'МИРА', text: STORY_TEXT.digDone },
-          { who: 'НИНА', text: 'Он лежит в нише и не поддаётся. Сначала письмена — иначе мы даже не поймём, что с ним делать.' },
-        ], 'explore');
-      }, 500);
-    }
+    // ключ остаётся висеть над алтарём: его надо подъехать и снять (E)
+    setTimeout(() => {
+      say([
+        { who: 'МИРА', text: STORY_TEXT.digDone },
+        { who: 'НИНА', text: 'Ключ висит над алтарём. Подъезжай ближе и снимай — без него к аномалии лучше не соваться.' },
+      ], 'explore');
+    }, 900);
   } else {
     toast(`Насыпь просела · вскрыто ${Math.round(moundAnim.to * 100)}%`);
   }
