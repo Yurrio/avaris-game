@@ -2565,6 +2565,32 @@ function openExcavation() {
   },closeTop);
 }
 
+/* Защита от застревания в храме: как только грунт ушёл и проступили стены,
+   машину выбрасывает наружу — за врата, ближе к открытому восточному проходу. */
+const TEMPLE_CLEAR_R = 21;          // за стенами храма и его вратами
+let stuckT = 0;
+const _stuckPos = new THREE.Vector3();
+
+function ejectFromTemple(power = 9) {
+  const gx = rover.pos.x - TEMPLE.x, gz = rover.pos.z - TEMPLE.z;
+  const gr = Math.hypot(gx, gz);
+  if (gr >= TEMPLE_CLEAR_R) return false;
+  const dx = gr > 0.01 ? gx / gr : 1, dz = gr > 0.01 ? gz / gr : 0;
+  // наружу, но с перекосом в сторону открытого прохода (+X)
+  let nx = dx * 0.5 + 0.5, nz = dz * 0.5;
+  const L = Math.hypot(nx, nz) || 1;
+  nx /= L; nz /= L;
+  const spot = world.freeSpot(TEMPLE.x + nx * TEMPLE_CLEAR_R, TEMPLE.z + nz * TEMPLE_CLEAR_R, 2);
+  rover.placeAt(spot[0], spot[1]);
+  rover.vel.set(nx * power, 0, nz * power);   // после placeAt: скорость не обнуляется
+  rover.speed = Math.max(rover.speed, power);
+  rover.shake = Math.max(rover.shake, 0.55);
+  rover.dust.emit(rover.pos, 16, 5, 'soil');
+  audio.crash();
+  toast('Машину отбросило от стен храма');
+  return true;
+}
+
 function updateMound(dt) {
   if (!moundAnim.active) return;
   moundAnim.t = Math.min(1, moundAnim.t + dt / 1.7);
@@ -2577,17 +2603,18 @@ function updateMound(dt) {
   // утащит внутрь арки, откуда нет выезда — плавно отодвигаем к краю
   const gx = rover.pos.x - TEMPLE.x, gz = rover.pos.z - TEMPLE.z;
   const gr = Math.hypot(gx, gz);
-  if (gr < 15) {
+  if (gr < 18) {
     const outX = gr > 0.01 ? gx / gr : 1, outZ = gr > 0.01 ? gz / gr : 0;
-    // до 9 м/с наружу — без рывка, но гарантированно успевает выйти за арку
-    const step = Math.min(15 - gr, 9 * dt) + 0.0001;
+    // выталкиваем за арку и сразу даём скорость наружу — машина отлетает,
+    // а не выползает из стены
+    const step = Math.min(18 - gr, 11 * dt) + 0.0001;
     rover.pos.x += outX * step;
     rover.pos.z += outZ * step;
-    rover.vel.x = 0; rover.vel.z = 0;
+    rover.vel.x = outX * 7; rover.vel.z = outZ * 7;
     rover.snapToGround();
     if (!moundAnim.warned) {
       moundAnim.warned = true;
-      toast('Свод просел — машину оттолкнуло от арки');
+      toast('Свод просел — машину отбросило от арки');
     }
   }
 
@@ -2615,6 +2642,7 @@ function updateMound(dt) {
 
   moundAnim.active = false;
   if (moundAnim.to >= 1) {
+    ejectFromTemple(8);          // храм открыт: из его объёма — наружу
     setDig(1);
     world.repaintDig();
     world.revealPhaseCore();
@@ -3470,6 +3498,16 @@ function frame(now) {
     // отклик на столкновения: галька подбрасывает, камень на скорости бьёт
     if (rover.bump > 0.01) { audio.bumpStone(rover.bump); rover.bump = 0; }
     if (rover.impact > 0.01) { audio.impact(rover.impact); rover.impact = 0; }
+
+    // застряли в храме: газ нажат, а машина не двигается — выбрасываем наружу
+    const tmpleR = Math.hypot(rover.pos.x - TEMPLE.x, rover.pos.z - TEMPLE.z);
+    if (digProgress() > 0.02 && tmpleR < 16 && (inp.fwd || inp.back) && rover.speed < 0.4) {
+      if (_stuckPos.distanceToSquared(rover.pos) < 0.05) stuckT += dt;
+      else { stuckT = 0; _stuckPos.copy(rover.pos); }
+      if (stuckT > 1.4) { stuckT = 0; ejectFromTemple(9); }
+    } else {
+      stuckT = 0;
+    }
 
     // первая ахола на пути: что это такое и как этим пользоваться
     if (!hintSeen('ahola')) {
