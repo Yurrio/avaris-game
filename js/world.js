@@ -2241,6 +2241,10 @@ export class World {
         if (kind === 'rock') {
           const s = 0.5 + rnd() * 1.5;
           scl.set(s, s * (0.6 + rnd() * 0.5), s);
+          // у додекаэдра центр смещён на +0.45, а низ — на −0.55 в локальных
+          // единицах: поднимаем на эту величину, чтобы камень лежал на песке
+          // (чуть утоплен), а не прятался в грунте до половины
+          pos.setY(meshHeightAt(px, pz) + scl.y * 0.45 - 0.12);
           col.setHex(bi.rock).multiplyScalar(0.8 + rnd() * 0.45);
           mat4.compose(pos, quat, scl);
           const mat = mat4.clone();

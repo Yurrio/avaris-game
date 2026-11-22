@@ -1793,7 +1793,11 @@ function toggleInspect() {
       ], () => paintInspectPrompt());
       return;
     }
-    say([{ who:'МИРА',text:art.text },{who:'ЛЕВ',text:"Записал. Осталось механизмов: N. Чем больше знаков, тем легче будет прочесть пластины.".replace('N',String(3-state.solved.length))}], () => paintInspectPrompt());
+    const firstTime = state.solved.length === 1;
+    const levLine = firstTime
+      ? 'Записал оба знака. Открой журнал (I) и впиши своими словами, что они означают — потом сверим с пластинами.'
+      : `Записал. Осталось механизмов: ${3 - state.solved.length}. Чем больше знаков, тем легче будет прочесть пластины.`;
+    say([{ who:'МИРА',text:art.text },{who:'ЛЕВ',text:levLine}], () => paintInspectPrompt());
     return;
   }
   paintInspectPrompt();
@@ -1865,9 +1869,11 @@ function submitLesson() {
     const left = STORY.ARTIFACTS.length - state.solved.length;
     say([{
       who: 'ЛЕВ',
-      text: left > 0
-        ? `Записал. Осталось механизмов: ${left}. Чем больше знаков, тем легче будет прочесть плиту.`
-        : 'Шесть знаков. Плита у насмешек не терпит — поехали, попробуем прочитать три текста.',
+      text: state.solved.length === 1
+        ? 'Записал оба знака. Открой журнал (I) и впиши своими словами, что они означают — потом сверим с пластинами.'
+        : left > 0
+          ? `Записал. Осталось механизмов: ${left}. Чем больше знаков, тем легче будет прочесть плиту.`
+          : 'Шесть знаков. Плита у насмешек не терпит — поехали, попробуем прочитать три текста.',
     }], 'explore');
   }, 1500);
 }

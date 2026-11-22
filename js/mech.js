@@ -594,7 +594,7 @@ export function buildLift(kitModel) {
   const ropes = [mkRope(COL_X + 1.3, 'cabin'), mkRope(-COL_X - 1.3, 'counter')];
 
   // --- пломба на ВЕРХУ кабины, вывеской над проёмом: на входе она мешает
-  const plaque=wall(1.2,1.05,.14,0,CAB_H+.78,.9);
+  const plaque=wall(1.2,1.05,.14,0,CAB_H-.30,.9);
   const med=makeMedallion(.48,'down','up');
   med.group.position.z=.09;plaque.add(med.group);
 
