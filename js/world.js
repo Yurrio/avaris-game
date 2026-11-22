@@ -1609,6 +1609,7 @@ export class World {
     this.loadCityArchive(P.anomalies[0].p).catch((err) => console.warn('[АВАРИС] Хранилище:', err));
     // завеса вокруг финала: пока не снята — внутрь не проехать
     this.barrierOpen = false;
+    this.gateOpen = false;         // створки древних врат: по умолчанию закрыты
     this.coreColliders = [{ pos: this.vault.pos.clone(), r: 50 }];
 
     /* --- плиты с письменами в мире больше нет: три текста закопаны в схронах --- */
@@ -1625,8 +1626,20 @@ export class World {
       site.group.rotation.set(0, 0, 0);
       scene.add(site.group);
       this.artifactSites.push({ ...site, kind: kinds[i], pos: site.group.position.clone() });
-      const rad = kinds[i] === 'gate' ? 4.2 : 2.6;
-      this.obstacles.push({ pos: site.group.position.clone(), r: rad });
+      if (kinds[i] === 'gate') {
+        // у врат столбы стоят всегда, а створки перекрывают проём только
+        // в закрытом состоянии — открытые врата проезжаются
+        for (const sx of [-3.15, 3.15]) {
+          this.obstacles.push({
+            pos: new THREE.Vector3(site.group.position.x + sx, site.group.position.y, site.group.position.z),
+            r: 1.35,
+            kind: 'wall',
+          });
+        }
+        this.gateDoor = { pos: site.group.position.clone(), r: 2.35 };
+      } else {
+        this.obstacles.push({ pos: site.group.position.clone(), r: 2.6 });
+      }
     });
 
     /* --- три манускрипта, закопанные в безопасных точках (вне аномалий) --- */
@@ -1791,6 +1804,10 @@ export class World {
       // как только насыпь тронута, врата видны — нельзя проезжать сквозь их стены
       for (const o of this.gatewayColliders) this.grid.add(o.pos, o.r);
     }
+    if (!this.gateOpen && this.gateDoor) {
+      // закрытые створки перекрывают проём между столбами
+      this.grid.add(this.gateDoor.pos, this.gateDoor.r, { kind: 'wall' });
+    }
     if (!this.barrierOpen && this.coreColliders) {
       for (const o of this.coreColliders) this.grid.add(o.pos, o.r, { kind: 'barrier' });
     }
@@ -1803,6 +1820,11 @@ export class World {
     a.on = !!on;
     a.markOff.visible = !a.on;
     a.markOn.visible = a.on;
+    if (kind === 'gate') {
+      // открыли — проём свободен, закрыли — снова стена
+      this.gateOpen = a.on;
+      this._buildGrid();
+    }
     return true;
   }
 
