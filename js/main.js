@@ -788,7 +788,7 @@ const STORY_TEXT = {
     'примитивные антенны Земли. На поверхность вышли трое: археолог Мира, физик Лев ' +
     'и бортинженер Нина. «Одиссей» ждёт на орбите. И где-то здесь идёт Великая буря.',
   fog: "Стоп! Дальше буря слишком плотная — она царапает обшивку. Пять метров, не больше.",
-  repair: "Обшивка не выдержала. Я заварил пробоины — но больше так не подставляйся.",
+  repair: "Обшивка не выдержала. Я заварила пробоины — но больше так не подставляйся.",
   digDone: "Готово. Слои расходятся, словно лепестки Сиренума. Ни следа коррозии.",
   artifact: "Фазовый ключ. Его слои — не украшение: это регуляторы энергии. Он откликается на импульсы к востоку от храма — к порогу резонанса.",
   signalDone: "Резонанс достигнут. Завеса расходится — по ту сторону стоят руины.",
@@ -1567,7 +1567,7 @@ function tryInteract() {
       audio.ahola();
       audio.spark();
       const add = 60;
-      say([{ who: 'ЛЕВ', text: STORY_TEXT.ahola }], 'explore');
+      say([{ who: 'НИНА', text: STORY_TEXT.ahola }], 'explore');
       toast(`Ахола разряжена · +${add} с`);
       paintProgress();
       saveGame();
@@ -1797,7 +1797,7 @@ function toggleInspect() {
     const levLine = firstTime
       ? 'Записал оба знака. Открой журнал (I) и впиши своими словами, что они означают — потом сверим с пластинами.'
       : `Записал. Осталось механизмов: ${3 - state.solved.length}. Чем больше знаков, тем легче будет прочесть пластины.`;
-    say([{ who:'МИРА',text:art.text },{who:'ЛЕВ',text:levLine}], () => paintInspectPrompt());
+    say([{ who:'НИНА',text:art.text },{who:'ЛЕВ',text:levLine}], () => paintInspectPrompt());
     return;
   }
   paintInspectPrompt();
@@ -2349,7 +2349,7 @@ function finishReading() {
   closeTop();
   say([
     { who: 'МИРА', text: 'Всё. Дальше язык кончается — начинаются дела.' },
-    { who: 'ЛЕВ', text: 'Гора, камень, насыпь. Заводи, я проверю баллон.' },
+    { who: 'НИНА', text: 'Гора, камень, насыпь. Заводи, я проверю баллон.' },
   ], 'explore');
 }
 
@@ -2485,7 +2485,7 @@ function updateMound(dt) {
       setTimeout(() => {
         say([
           { who: 'МИРА', text: STORY_TEXT.digDone },
-          { who: 'ЛЕВ', text: 'Он лежит в нише и не поддаётся. Сначала письмена — иначе мы даже не поймём, что с ним делать.' },
+          { who: 'НИНА', text: 'Он лежит в нише и не поддаётся. Сначала письмена — иначе мы даже не поймём, что с ним делать.' },
         ], 'explore');
       }, 500);
     }
@@ -3296,7 +3296,7 @@ function frame(now) {
         rover.damage(28 * (1 - d / 42) * dt, 'аномалия');
         if (!ui._anomWarned) {
           ui._anomWarned = true;
-          say([{ who: 'ЛЕВ', text: 'Не подъезжай! Без ключа эта штука режет обшивку.' }], 'explore');
+          say([{ who: 'НИНА', text: 'Не подъезжай! Без ключа эта штука режет обшивку.' }], 'explore');
           audio.crash();
         }
       } else if (d > 52) ui._anomWarned = false;
@@ -3374,7 +3374,7 @@ function emergencyRepair() {
   rover.fog = 0;
   rover.hitFlash = 1;
   audio.crash();
-  say([{ who: 'ЛЕВ', text: STORY_TEXT.repair }], 'explore');
+  say([{ who: 'НИНА', text: STORY_TEXT.repair }], 'explore');
   toast('Аварийный ремонт · прочность 60%');
 }
 
@@ -3391,7 +3391,7 @@ function finishDeparture(){
   document.body.classList.remove('departing');
   $('skipDeparture').hidden=true;
   say([{who:'МИРА',text:STORY_TEXT.intro},
-    {who:'ЛЕВ',text:'Начнём со схронов. Веди на сигнал радара, у самой пластины нажми F.'}],'explore');
+    {who:'НИНА',text:'Начнём со схронов. Веди на сигнал радара, у самой пластины нажми F.'}],'explore');
   saveGame();
 }
 
