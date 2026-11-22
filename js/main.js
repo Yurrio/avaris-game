@@ -2360,11 +2360,13 @@ const moundAnim = { active: false, from: 0, to: 0, t: 0 };
 const MOUND_STEP = 1 / 3;   // один заход снимает треть насыпи
 
 function onMound() {
+  if (state.artifact && state.excavation && state.excavation.recorded) return false;
   if (state.artifact) return false;
   return Math.hypot(rover.pos.x - TEMPLE.x, rover.pos.z - TEMPLE.z) < MOUND_R - 3;
 }
 
 function moundDig() {
+  if (state.decoded) { openExcavation(); return; }
   // Копать можно откуда угодно: если машина стоит над осевым проёмом, её
   // мягко оттолкнёт от арки уже во время просадки свода (updateMound).
   if (rover.energy < HAND_DIG_COST) {
@@ -2415,6 +2417,36 @@ function moundDig() {
   audio.dig(true);
   audio.rumble(0.9, 0.1);
   saveGame();
+}
+
+function openExcavation() {
+  if(mode!=='explore' || state.excavation.recorded) return;
+  const reconstruction=state.artifact;
+  $('cutTitle').textContent=reconstruction?'Реконструкция раскопа':'Раскопки храма';
+  $('cutExtract').textContent=reconstruction?'Завершить реконструкцию':'Извлечь фазовый ключ';
+  mode='excavation';
+  releaseLook(); rover.vel.set(0,0,0); rover.speed=0;
+  keys.Space=false;
+  camera.position.set(TEMPLE.x+19,meshHeightAt(TEMPLE.x,TEMPLE.z)+28,TEMPLE.z+24);
+  camera.lookAt(TEMPLE.x,meshHeightAt(TEMPLE.x,TEMPLE.z),TEMPLE.z);
+  composer.render();
+  ui.prompt.classList.remove('on');
+  $('excavation').classList.remove('hidden');
+  showDigPanel(state.excavation,()=>{audio.dig(true);saveGame();},()=>{
+    if(mode!=='excavation') return;
+    state.excavation.recorded=true;
+    if(reconstruction){saveGame();closeTop();toast('Реконструкция записана в журнал');return;}
+    setDig(1); state.dig=1;
+    world.repaintDig(); world.regroundArea(TEMPLE.x,TEMPLE.z,MOUND_R+10);
+    world.setTempleReveal(1);world.revealPhaseCore();
+    // A rover parked on the buried arch must finish on the open forecourt.
+    const dx=rover.pos.x-TEMPLE.x,dz=rover.pos.z-TEMPLE.z;
+    if(Math.hypot(dx,dz)<15) rover.placeAt(TEMPLE.x+18,TEMPLE.z-6,[TEMPLE.x,TEMPLE.z]);
+    else rover.snapToGround();
+    STORY.complete(state,'artifact'); saveGame();paintProgress();
+    $('excavation').classList.add('hidden');
+    say([{who:'МИРА',text:STORY_TEXT.digDone},{who:'ЛЕВ',text:STORY_TEXT.artifact}],openArtifact);
+  },closeTop);
 }
 
 function updateMound(dt) {
