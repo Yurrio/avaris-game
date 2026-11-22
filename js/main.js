@@ -2153,7 +2153,7 @@ function renderTranslator() {
     const text = STORY.TEXTS.find((x) => x.id === sc.textId);
     const known = found.includes(sc.id);
     // неподнятая пластина — просто пустой слот: ни металла, ни подписей
-    if (!known) return '<article class="tr-text"><div class="tr-plate tr-plate--empty"></div></article>';
+    if (!known) return '<article class="tr-text"><h4>&nbsp;</h4><div class="tr-plate tr-plate--empty"></div></article>';
     const body = known
       ? `<div class="tr-plate dmg-${DMG[idx % 3]}"><div class="tr-plate__grid">${text.glyphs.map((g, i) => {
         const has = pickedGlyphs.has(g);
@@ -2161,7 +2161,7 @@ function renderTranslator() {
         const cls = plateGlyphClass(g, has, bad);
         return `<span class="${cls}" data-glyph="${g}" data-slot="${sc.id}-${i}">${g}</span>`;
       }).join('')}</div></div>`
-      : `<div class="tr-plate tr-plate--empty"></div>`;
+      : `<h4>&nbsp;</h4><div class="tr-plate tr-plate--empty"></div>`;
     return `<article class="tr-text"><h4>${sc.title}</h4>${body}</article>`;
   }).join('');
 
