@@ -2436,16 +2436,19 @@ function openExcavation() {
     if(mode!=='excavation') return;
     state.excavation.recorded=true;
     if(reconstruction){saveGame();closeTop();toast('Реконструкция записана в журнал');return;}
-    setDig(1); state.dig=1;
-    world.repaintDig(); world.regroundArea(TEMPLE.x,TEMPLE.z,MOUND_R+10);
-    world.setTempleReveal(1);world.revealPhaseCore();
-    // A rover parked on the buried arch must finish on the open forecourt.
-    const dx=rover.pos.x-TEMPLE.x,dz=rover.pos.z-TEMPLE.z;
-    if(Math.hypot(dx,dz)<15) rover.placeAt(TEMPLE.x+18,TEMPLE.z-6,[TEMPLE.x,TEMPLE.z]);
-    else rover.snapToGround();
-    STORY.complete(state,'artifact'); saveGame();paintProgress();
-    $('excavation').classList.add('hidden');
-    say([{who:'МИРА',text:STORY_TEXT.digDone},{who:'ЛЕВ',text:STORY_TEXT.artifact}],openArtifact);
+    // Слои расходимся на глазах: закрываем схему, возвращаем камеру к машине
+    // и медленно проседаем насыпью — без мгновенного переноса к храму.
+    closeTop();
+    world.repaintDig();
+    moundAnim.active = true;
+    moundAnim.from = digProgress();
+    moundAnim.to = 1;
+    moundAnim.t = 0;
+    moundAnim.warned = false;
+    moundAnim.acc = 0;
+    rover.shake = Math.max(rover.shake, 0.45);
+    audio.rumble(1.2, 0.12);
+    saveGame();
   },closeTop);
 }
 
@@ -2503,6 +2506,7 @@ function updateMound(dt) {
     world.repaintDig();
     const taken = STORY.complete(state, 'artifact');
     world.revealPhaseCore();
+    paintProgress();
     saveGame();
     if (taken) {
       setTimeout(() => {
@@ -3240,6 +3244,7 @@ function frame(now) {
     return;
   }
   updateHandDigs(dt);
+  updateMound(dt);
   updateWhiteout(dt);
   updateRadar(dt);
   updateScrollDig(dt);
