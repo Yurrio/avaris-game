@@ -1638,7 +1638,7 @@ export class World {
       this.scrollCaches.push({
         ...cache,
         id: sc.id,
-        title: sc.title,
+        title: sc.title || sc.name,   // scrollSites отдаёт name
         pos: cache.group.position.clone(),
         baseY: cache.group.position.y,
         dug: 0,
