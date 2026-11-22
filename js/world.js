@@ -1445,7 +1445,9 @@ function buildVault() {
   barrierWire.position.y = 44;
   g.add(barrierWire);
 
-  return { group: g, fallback, ring, ring2, core, coreMat, beamMat, glow, spire, tip, tipMat, barrier, barrierWire, barrierMat };
+  // spire и beam отдаём наружу: финальным кадрам нужен сам шпиль, а не вся
+  // процедурная постройка, которую скрывает модель города (см. epilogue.js)
+  return { group: g, fallback, ring, ring2, core, coreMat, beam, beamMat, glow, spire, tip, tipMat, barrier, barrierWire, barrierMat };
 }
 
 /* ==================================================== ИНДЕКС СТОЛКНОВЕНИЙ */

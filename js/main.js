@@ -1,4 +1,5 @@
 import {animateDeparture,departureDuration} from './lander.js';
+import {createEpilogue} from './epilogue.js';
 import {LANDING_SITE} from './terrain.js';
 import {showDigPanel} from './dig-panel.js';
 import {templeReport} from './excavation.js';
@@ -880,6 +881,13 @@ const keys = Object.create(null);
 const BLOCK = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 addEventListener('keydown', (e) => {
+  if (mode === 'epilogue') {
+    if (['Space', 'Escape', 'Enter'].includes(e.code)) {
+      e.preventDefault();
+      if (!e.repeat) skipEpilogue();
+    }
+    return;
+  }
   if(mode==='departure'){
     if(['Space','Escape','Enter'].includes(e.code)){
       e.preventDefault();
@@ -2129,7 +2137,18 @@ function itemThumb(kind) {
     'picks' — знаку уже вписано значение (самый строгий вариант). */
 const TRANSLATOR_HIGHLIGHT = 'note';
 
+/* Две версии пластин, различаются одним словом в адресе:
+   ?notes=on  — знаки, у которых есть заметка, обведены (по умолчанию);
+   ?notes=off — пластины чистые: ни обводок, ни притухания, все знаки равны. */
+const NOTES_MODE = (() => {
+  const m = /(?:^|[?&#])notes=(on|off)(?:$|[&#])/i.exec(location.search + location.hash);
+  return m ? m[1].toLowerCase() : 'on';
+})();
+// версия пластин видна и в разметке: пригодится и для отладки, и для CSS
+document.body.dataset.notes = NOTES_MODE;
+
 function plateGlyphClass(glyph, has, bad) {
+  if (NOTES_MODE === 'off') return `tr-g${has ? ' has' : ''}${bad ? ' bad' : ''}`;
   const key = STORY.KEYS.find((k) => k.glyph === glyph);
   const noted = key ? !!String(state.signNotes[key.id] || '').trim() : false;
   const seen = key ? state.keys.includes(key.id) : false;
@@ -2842,7 +2861,7 @@ let signalPointer = false;
 /* ================================================================ ПАУЗА */
 function openPause(auto = false) {
   if (!auto) audio.ui();
-  if (mode === 'ending' || mode === 'menu' || mode === 'defeat') return;
+  if (['ending', 'epilogue', 'menu', 'defeat'].includes(mode)) return;
   resumeSignal=mode==='signal';
   if(resumeSignal) { keys.Space=false; signalPointer=false; $('signal').classList.add('hidden'); }
   mode = 'pause';
@@ -2929,12 +2948,72 @@ function finalDialogue() {
   say([{"who": "УСТРОЙСТВО", "text": "Доступ разрешён. Вы стоите в узле номер ноль. Две тысячи лет назад мы сами построили бурю — чтобы управлять небом. Сначала это работало."}, {"who": "УСТРОЙСТВО", "text": "Потом буря стала новой верой. Совет объявил её священной и запретил отключение. Инженеры успели построить ахолы — последний способ выиграть время для детей."}, {"who": "МИРА", "text": "То есть вы погибли не от бури. Вы погибли от собственного решения её не выключать."}, {"who": "ЛЕВ", "text": "Мира. Если отключить шпиль, небеса откроются. И всё, что здесь, обрушится, погребя нас."}, {"who": "УСТРОЙСТВО", "text": "Полное отключение уничтожит хранилище. Содержимое капсул можно передать вовне заранее. Для разгрузки нужны реакторы ровера и корабля — выжить в контуре невозможно."}, {"who": "МИРА", "text": "А если уйдём — буря останется, а спящие в хранилище так и не проснутся. Мы увезём их культуру, но сам Аварис останется в забвении. Решим вместе."}],'ending');
 }
 
-function chooseEnding(kind) {
-  STORY.finish(state, kind);
-  saveGame();
-  renderEnding(kind);
+/* ------------------------------------------- ФИНАЛЬНЫЕ КАДРЫ (эпилог)
+   Выбор концовки не переключает карточку сразу: сначала две минуты…
+   точнее, восемнадцать секунд кино на живой сцене — шпиль рвётся и небо
+   расчищается, либо модуль уходит к «Одиссею». Карточка финала появляется
+   уже поверх доснятого кадра и позволяет пересмотреть его заново. */
+let epilogue = null;
+let cineCapTimer = 0;
+let epilogueKind = 'free';
+
+function cineCaption(text) {
+  const box = $('cineCaption');
+  if (!box) return;
+  if (!text) { box.classList.remove('on'); return; }
+  box.classList.remove('on');
+  clearTimeout(cineCapTimer);
+  cineCapTimer = setTimeout(() => {
+    $('cineText').textContent = text;
+    box.classList.add('on');
+  }, 340);
+}
+
+function cineFlash(k) {
+  const el = $('cineFlash');
+  if (el) el.style.opacity = String(Math.max(0, Math.min(1, k)));
+}
+
+function startEpilogue(kind) {
+  if (!epilogue) {
+    epilogue = createEpilogue({ world, rover, camera, audio, setDaylight: applyDaylight,
+      onCaption: cineCaption, onFlash: cineFlash });
+  }
+  $('ending').classList.add('hidden');
+  $('epilogue').classList.remove('hidden');
+  $('cineSkip').hidden = false;
+  requestAnimationFrame(() => $('epilogue').classList.add('in'));
+  document.body.classList.add('cinema');
+  audio.init();
+  audio.resume();
+  epilogueKind = kind === 'leave' ? 'leave' : 'free';
+  mode = 'epilogue';
+  epilogue.start(epilogueKind);
+}
+
+function skipEpilogue() {
+  if (mode !== 'epilogue' || !epilogue) return;
+  epilogue.skip();
+}
+
+function finishEpilogue() {
+  camera.fov = 58;
+  camera.updateProjectionMatrix();
+  document.body.classList.remove('cinema');
+  $('epilogue').classList.remove('in');
+  $('cineSkip').hidden = true;
+  setTimeout(() => $('epilogue').classList.add('hidden'), 40);
+  renderEnding(state.ending || epilogueKind);
   audio.endPad();
   MUSIC.kill();
+}
+
+function chooseEnding(kind) {
+  // старый сейв мог привести к узлу без осмотра хранилища: финал всё равно
+  // играем, иначе кнопка молча ничего не делает
+  if (!STORY.finish(state, kind)) state.ending = kind;
+  saveGame();
+  startEpilogue(kind);
 }
 
 /** Карточка финала: используется и сразу, и при возврате в сохранённую игру */
@@ -2950,7 +3029,14 @@ function renderEnding(kind) {
   b.innerHTML = '<b>Новая экспедиция</b><span>Начать заново</span>';
   b.onclick = newGame;
   $('endingChoices').append(b);
+  const again = document.createElement('button');
+  again.className = 'choice';
+  again.innerHTML = '<b>Пересмотреть финал</b><span>Проиграть финальные кадры ещё раз</span>';
+  again.onclick = () => startEpilogue(kind);
+  $('endingChoices').append(again);
   mode = 'ending';
+  // HUD под карточкой финала не нужен: остаётся только сцена
+  document.body.classList.add('cinema');
   $('ending').classList.remove('hidden');
 }
 
@@ -3212,6 +3298,15 @@ function frame(now) {
   const dt = Math.min(0.06, raw);
   elapsed += dt;
   const t = elapsed;
+  if (mode === 'epilogue') {
+    // кадр живёт сам по себе: сцена идёт, камеру ведёт таймлайн,
+    // HUD спрятан, паузы и ввод игрока в кадр не попадают
+    const advance = document.hidden ? 0 : Math.min(raw, 0.1);
+    world.update(t, dt, rover.pos);
+    if (epilogue && epilogue.update(advance)) finishEpilogue();
+    composer.render();
+    return;
+  }
   if(mode==='departure'){
     const advance=document.hidden?0:Math.min(raw,.20);
     departureTime=Math.min(departureDuration,departureTime+advance);
@@ -3521,6 +3616,7 @@ function bindUi() {
   $('defeatRestart').addEventListener('click', newGame);
   $('endingLeave').addEventListener('click', () => chooseEnding('leave'));
   $('endingFree').addEventListener('click', () => chooseEnding('free'));
+  $('cineSkip').addEventListener('click', skipEpilogue);
   $('mapCanvas').addEventListener('click', (e) => {
     const cv = $('mapCanvas');
     const rect = cv.getBoundingClientRect();
@@ -3587,6 +3683,10 @@ window.__avaris = {
   get state() { return state; },
   get mode() { return mode; },
   begin, saveGame, readSave,
+  // финальные кадры: посмотреть концовку без прохождения
+  playEnding(kind = 'free') { startEpilogue(kind); return mode; },
+  skipEnding: skipEpilogue,
+  get epilogue() { return epilogue; },
   handDig, handGrow,
   get whiteout() { return whiteT; },
   get debris() { return debris; },

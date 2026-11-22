@@ -32,6 +32,7 @@ js/rover-model.js   модель ровера
 js/cursors.js       варианты курсора мыши
 js/tangut.js        тангутские знаки
 js/motes.js         частицы
+js/epilogue.js      финальные кадры: анимированные концовки на живой сцене
 js/sky-env.js       небо и освещение
 js/world-kit.js     вспомогательные модели окружения
 js/prop-models.js   модели предметов
