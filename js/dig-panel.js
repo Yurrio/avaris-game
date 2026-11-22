@@ -61,6 +61,12 @@ export function showDigPanel(progress,onChange,onExtract,onExit) {
         }
       }
       if(st.fallen && !st.cleared) for(const dx of [-24,2,21])polygon([[x+dx-8,y+9],[x+dx,y],[x+dx+7,y+5],[x+dx+5,y+12]],'#5f564c');
+      if(s.plate){                                  // какая плита давит на участок
+        ctx.textAlign='center';
+        ctx.font='700 14px system-ui,sans-serif';
+        ctx.fillStyle=st.fallen?'#ff9b8a':st.supported?'#a7ffda':'#ffbb73';
+        ctx.fillText(s.plate,x,y-46);
+      }
       if(st.braced) for(const dx of [-20,15])line([[x+dx,y+11],[x+dx,y-5]],'#a7ffda',5);
     }
     const opened=nicheOpen(progress);
@@ -86,9 +92,14 @@ export function showDigPanel(progress,onChange,onExtract,onExit) {
       button.title=sectors.find(s=>s.id===id).name;
     }
     el('cutName').textContent=site.name;
-    el('cutLoad').textContent=st.cleared?'Грунт снят':st.fallen?'Обвал · плита перекрыла проход':st.supported?'Плита '+site.plate+' удерживается подпоркой':st.load?'Вес плиты '+site.plate+' приходится на грунт':'Безопасный грунт';
+    const samePlate=sectors.filter(n=>n.plate&&n.plate===site.plate).length;
+    el('cutLoad').textContent=st.cleared?'Грунт снят':st.fallen?'Обвал · плита перекрыла проход':st.supported?'Плита '+site.plate+' удерживается подпоркой'+(samePlate>1?' — одна держит оба участка':''):st.load?'Вес плиты '+site.plate+' приходится на грунт':'Безопасный грунт';
     el('cutHint').textContent=note || (st.fallen?'Разберите обломки. Ключ уцелел.':st.load && !st.supported?'Трещина над участком. Поставьте подпорку перед расчисткой.':st.cleared?'Выберите следующий участок.':'Манипулятор готов к расчистке.');
     el('cutStock').textContent='Свободные подпорки · '+(2-progress.braces.length)+' / 2';
+    const rules=el('cutRules');
+    if(rules) rules.textContent=progress.clear.length
+      ? 'Дальше — тот же порядок: под плитой сначала подпорка, потом расчистка.'
+      : 'Ниша откроется, когда расчищен Ц2 или Б3. Под плитой сначала поставьте подпорку — без неё плита осядет. Подпорок две на весь раскоп.';
     el('cutClear').disabled=st.cleared || st.fallen;
     el('cutBrace').disabled=st.cleared || !st.load || st.supported || st.fallen || progress.braces.length>=2;
     el('cutRemove').disabled=!st.braced;
