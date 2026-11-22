@@ -1348,9 +1348,19 @@ function paintSignStrip() {
   }).join('');
 }
 
+let journalHintShown = false;
 function paintProgress() {
   if (!ui.words) return;
   ui.words.textContent = `${state.keys.length} / ${STORY.KEYS.length}`;
+  // первый знак найден — объясняем, зачем журнал и что туда писать
+  if (state.keys.length === 1 && !journalHintShown) {
+    journalHintShown = true;
+    setTimeout(() => {
+      if (mode === 'explore') {
+        toast('Знак записан. Откройте I — в журнале впишите свою догадку о смысле');
+      }
+    }, 1400);
+  }
   // журнал знаков в HUD появляется только после первого механизма
   const sb = $('signsBlock');
   if (sb) sb.classList.toggle('hidden', state.keys.length === 0);
@@ -2110,6 +2120,7 @@ function renderTranslator() {
 
   const found = state.scrolls;
   const pickedGlyphs = new Set((state.picks || []).map((p) => p.glyph));
+  const TRANSLATOR_HIGHLIGHT = 'seen';   // 'seen' | 'picks'
   const DMG = ['a', 'b', 'c'];
   $('trTexts').innerHTML = STORY.SCROLLS.map((sc, idx) => {
     const text = STORY.TEXTS.find((x) => x.id === sc.textId);
@@ -2120,7 +2131,13 @@ function renderTranslator() {
       ? `<div class="tr-plate dmg-${DMG[idx % 3]}"><div class="tr-plate__grid">${text.glyphs.map((g, i) => {
         const has = pickedGlyphs.has(g);
         const bad = tr.bad && tr.bad.has(g);
-        const cls = `tr-g${has ? ' has' : ''}${bad ? ' bad' : ''}`;
+        // Подсветка: 'seen' — знаки, которые игрок уже видел на механизмах
+        // (по умолчанию, как у коллег). 'picks' — только уже назначенные
+        // значения: строгий вариант, когда игрок сам ищет знак на пластине.
+        const familiar = TRANSLATOR_HIGHLIGHT === 'seen'
+          && STORY.KEYS.some((k) => k.glyph === g && state.keys.includes(k.id));
+        const deep = TRANSLATOR_HIGHLIGHT === 'picks' ? has : familiar || has;
+        const cls = `tr-g${deep ? ' familiar' : ' unseen'}${has ? ' has' : ''}${bad ? ' bad' : ''}`;
         return `<span class="${cls}" data-glyph="${g}" data-slot="${sc.id}-${i}">${g}</span>`;
       }).join('')}</div></div>`
       : `<div class="tr-plate tr-plate--empty"></div>`;
